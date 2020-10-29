@@ -4,8 +4,8 @@ use nom::{
     multi::{many0, fold_many0},
     bytes::complete::{tag, take_until, take_till1},
     combinator::{not, map},
-    branch::alt,
     character::complete::char,
+    branch::alt
 };
 
 #[derive(Clone, Debug)]
@@ -13,6 +13,12 @@ pub enum AST {
     String(String),
     Function(Vec<Vec<AST>>),
     Variable(Vec<Vec<AST>>)
+}
+
+enum ASTVariants {
+    Comment,
+    ASTValue(AST),
+    ASTVec(Vec<AST>)
 }
 
 fn parse_comment(input: &str) -> IResult<&str, ()> {
@@ -39,16 +45,27 @@ fn parse_comment(input: &str) -> IResult<&str, ()> {
     Ok((input, ()))
 }
 
-fn add_block_arg(mut vec: Vec<AST>, r: Option<AST>) -> Vec<AST> {
-    if let Some(ast) = r {
-        match (&ast, vec.last_mut()) {
-            (AST::String(s), Some(AST::String(ast_str))) => {
-                ast_str.push_str(s);
-            }
-            _ => {
-                vec.push(ast);
+fn add_block_arg(mut vec: Vec<AST>, r: ASTVariants) -> Vec<AST> {
+    match r {
+        ASTVariants::ASTValue(ast) => {
+            match (&ast, vec.last_mut()) {
+                (AST::String(new_str), Some(AST::String(str))) => {
+                    str.push_str(new_str);
+                }
+                _ => vec.push(ast)
             }
         }
+        ASTVariants::ASTVec(mut ast) => {
+            match (ast.first(), vec.last_mut()) {
+                (Some(AST::String(v)), Some(AST::String(s))) => {
+                    s.push_str(v);
+                    ast.remove(0);
+                }
+                _ => {}
+            }
+            vec.append(&mut ast)
+        }
+        ASTVariants::Comment => {}
     }
     vec
 }
@@ -57,9 +74,10 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
     move |i: &str| {
         fold_many0(
             alt((
-                map(take_till1(|c| chars.contains(&c)), |s: &str| Some(AST::String(s.to_owned()))),
-                map(parse_comment, |_| None),
-                map(parse_block, Some)
+                map(take_till1(|c| chars.contains(&c)), |s: &str| ASTVariants::ASTValue(AST::String(s.to_owned()))),
+                map(parse_escaped_block, ASTVariants::ASTVec),
+                map(parse_comment, |_| ASTVariants::Comment),
+                map(parse_block, ASTVariants::ASTValue)
             )),
             Vec::new(),
             add_block_arg
@@ -127,12 +145,37 @@ fn parse_block(input: &str) -> IResult<&str, AST> {
     }
 }
 
+fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
+    let (input, _) = tag("{>")(input)?;
+    let (input, mut body) = fold_many0(
+        alt((
+            map(take_till1(|c| c == '{' || c == '}'), |s: &str| ASTVariants::ASTValue(AST::String(s.to_owned()))),
+            map(parse_escaped_block, ASTVariants::ASTVec),
+            map(parse_comment, |_| ASTVariants::Comment),
+            map(parse_block, ASTVariants::ASTValue)
+        )),
+        vec![AST::String(String::from("{"))],
+        add_block_arg
+    )(input)?;
+    let (input, _) = tag("}")(input)?;
+    match body.last_mut() {
+        Some(AST::String(ref mut s)) => {
+            s.push_str("}");
+        }
+        Some(_) | None => {
+            body.push(AST::String(String::from("}")))
+        }
+    }
+    Ok((input, body))
+}
+
 pub fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
     fold_many0(
         alt((
-            map(take_till1(|c| c == '{'), |s: &str| Some(AST::String(s.to_owned()))),
-            map(parse_comment, |_| None),
-            map(parse_block, Some)
+            map(take_till1(|c| c == '{'), |s: &str| ASTVariants::ASTValue(AST::String(s.to_owned()))),
+            map(parse_escaped_block, ASTVariants::ASTVec),
+            map(parse_comment, |_| ASTVariants::Comment),
+            map(parse_block, ASTVariants::ASTValue)
         )),
         Vec::new(),
         add_block_arg
