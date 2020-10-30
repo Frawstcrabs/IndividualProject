@@ -1,10 +1,10 @@
 extern crate nom;
 use nom::{
     IResult,
-    multi::{many0, fold_many0},
+    multi::{many0, fold_many0, fold_many1},
     bytes::complete::{tag, take_until, take_till1},
     combinator::{not, map},
-    character::complete::char,
+    character::complete::{char, anychar},
     branch::alt
 };
 
@@ -45,6 +45,39 @@ fn parse_comment(input: &str) -> IResult<&str, ()> {
     Ok((input, ()))
 }
 
+fn parse_string(check: impl Fn(char) -> bool) -> impl Fn(&str) -> IResult<&str, String> {
+    fn parse_escaped_char(input: &str) -> IResult<&str, String> {
+        let (input, _) = char('\\')(input)?;
+        let (input, c) = anychar(input)?;
+
+        let escaped_c = match c {
+            '{' | '}' | ':' | ';' | '\\' | '>' => c.to_string(),
+            'n' => String::from("\n"),
+            _ => {
+                let mut ret = String::from("\\");
+                ret.push(c);
+                ret
+            }
+        };
+
+        Ok((input, escaped_c))
+    }
+
+    move |i: &str| {
+        fold_many1(
+            alt((
+                parse_escaped_char,
+                map(take_till1(|c| c == '\\' || check(c)), String::from)
+            )),
+            String::new(),
+            |mut s1, s2| {
+                s1.push_str(&s2);
+                s1
+            }
+        )(i)
+    }
+}
+
 fn add_block_arg(mut vec: Vec<AST>, r: ASTVariants) -> Vec<AST> {
     match r {
         ASTVariants::ASTValue(ast) => {
@@ -74,7 +107,7 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
     move |i: &str| {
         fold_many0(
             alt((
-                map(take_till1(|c| chars.contains(&c)), |s: &str| ASTVariants::ASTValue(AST::String(s.to_owned()))),
+                map(parse_string(|c| chars.contains(&c)), |s| ASTVariants::ASTValue(AST::String(s))),
                 map(parse_escaped_block, ASTVariants::ASTVec),
                 map(parse_comment, |_| ASTVariants::Comment),
                 map(parse_block, ASTVariants::ASTValue)
@@ -149,7 +182,7 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
     let (input, _) = tag("{>")(input)?;
     let (input, mut body) = fold_many0(
         alt((
-            map(take_till1(|c| c == '{' || c == '}'), |s: &str| ASTVariants::ASTValue(AST::String(s.to_owned()))),
+            map(parse_string(|c| c == '{' || c == '}'), |s| ASTVariants::ASTValue(AST::String(s))),
             map(parse_escaped_block, ASTVariants::ASTVec),
             map(parse_comment, |_| ASTVariants::Comment),
             map(parse_block, ASTVariants::ASTValue)
@@ -172,7 +205,7 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
 pub fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
     fold_many0(
         alt((
-            map(take_till1(|c| c == '{'), |s: &str| ASTVariants::ASTValue(AST::String(s.to_owned()))),
+            map(parse_string(|c| c == '{'), |s| ASTVariants::ASTValue(AST::String(s))),
             map(parse_escaped_block, ASTVariants::ASTVec),
             map(parse_comment, |_| ASTVariants::Comment),
             map(parse_block, ASTVariants::ASTValue)
