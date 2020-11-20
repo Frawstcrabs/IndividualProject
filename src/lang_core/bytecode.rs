@@ -21,7 +21,7 @@ fn ast_bytecode(prog: &mut Program, ast: &AST, stackvals: &mut usize) {
         AST::String(s) => {
             prog.instructions.push(Instruction::PUSH(s.to_owned()));
             *stackvals += 1;
-        }
+        },
         AST::Function(args) => {
             let name = &args[0];
             match &name[..] {
@@ -31,7 +31,7 @@ fn ast_bytecode(prog: &mut Program, ast: &AST, stackvals: &mut usize) {
                         ast_vec_bytecode(prog, &args[1]);
                         ast_vec_bytecode(prog, &args[2]);
                         prog.instructions.push(Instruction::SETVAR);
-                    }
+                    },
                     "if" => {
                         assert!(args.len() > 1);
                         *stackvals += 1;
@@ -77,18 +77,18 @@ fn ast_bytecode(prog: &mut Program, ast: &AST, stackvals: &mut usize) {
                                 _ => unreachable!()
                             }
                         }
-                    }
+                    },
                     _ => {
                         panic!("unsupported function found");
-                    }
-                }
+                    },
+                },
                 _ => {
                     panic!("unsupported function found");
-                }
+                },
             }
-        }
+        },
         AST::Variable(args) => {
-            assert!(args.len() >= 1);
+            //assert!(args.len() >= 1);
             ast_vec_bytecode(prog, &args[0]);
             prog.instructions.push(Instruction::DEREFVAR);
             *stackvals += 1;
@@ -112,7 +112,7 @@ fn ast_vec_bytecode(prog: &mut Program, astlist: &[AST]) {
         _ => {
             // concat values to a single item
             prog.instructions.push(Instruction::CONCAT(stack_vals));
-        }
+        },
     }
 }
 

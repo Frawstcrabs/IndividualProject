@@ -15,13 +15,13 @@ impl ToString for VarValues {
         match self {
             VarValues::Nil => {
                 String::new()
-            }
+            },
             VarValues::Str(s) => {
                 s.to_owned()
             },
             VarValues::Num(v) => {
                 v.to_string()
-            }
+            },
         }
     }
 }
@@ -59,21 +59,21 @@ impl Context {
             match &prog.instructions[inst] {
                 Instruction::PUSHSTR(s) => {
                     self.stack.push(Gc::new(RefCell::new(VarValues::Str(s.to_owned()))));
-                }
+                },
                 Instruction::PUSHNIL => {
                     self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));
-                }
+                },
                 Instruction::IFFALSE(i) => {
                     let test: bool = (&*self.stack.pop().unwrap().borrow()).into();
                     if !test {
                         inst = *i;
                         continue;
                     }
-                }
+                },
                 Instruction::GOTO(i) => {
                     inst = *i;
                     continue;
-                }
+                },
                 Instruction::CONCAT(n) => {
                     let n = *n;
                     if n >= 2 {
@@ -109,12 +109,12 @@ impl Context {
                             }
                         }
                     }
-                }
+                },
                 Instruction::SETVAR => {
                     let value = self.stack.pop().unwrap();
                     let name = self.stack.pop().unwrap().borrow().to_string();
                     self.vars.insert(name, value);
-                }
+                },
                 Instruction::DEREFVAR => {
                     let name = self.stack.pop().unwrap().borrow().to_string();
                     let var_value = match self.vars.get(&name) {
@@ -122,10 +122,10 @@ impl Context {
                         None => Gc::new(RefCell::new(VarValues::Str(format!("<{}:unknown var>", name))))
                     };
                     self.stack.push(var_value);
-                }
+                },
                 Instruction::END => {
                     break;
-                }
+                },
             }
             inst += 1;
         }
