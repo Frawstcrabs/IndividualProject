@@ -111,9 +111,9 @@ impl Context {
                     }
                 }
                 Instruction::SETVAR => {
-                    let value = self.stack.remove(self.stack.len() - 1);
-                    let name = self.stack.remove(self.stack.len() - 1).borrow().to_string();
-                    self.vars.insert(name, value.clone());
+                    let value = self.stack.pop().unwrap();
+                    let name = self.stack.pop().unwrap().borrow().to_string();
+                    self.vars.insert(name, value);
                 }
                 Instruction::DEREFVAR => {
                     let name = self.stack.remove(self.stack.len() - 1).borrow().to_string();
