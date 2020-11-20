@@ -116,8 +116,12 @@ impl Context {
                     self.vars.insert(name, value);
                 }
                 Instruction::DEREFVAR => {
-                    let name = self.stack.remove(self.stack.len() - 1).borrow().to_string();
-                    self.stack.push(self.vars.get(&name).unwrap().clone());
+                    let name = self.stack.pop().unwrap().borrow().to_string();
+                    let var_value = match self.vars.get(&name) {
+                        Some(v) => Gc::clone(v),
+                        None => Gc::new(RefCell::new(VarValues::Str(format!("<{}:unknown var>", name))))
+                    };
+                    self.stack.push(var_value);
                 }
                 Instruction::END => {
                     break;
