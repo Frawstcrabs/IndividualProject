@@ -3,6 +3,7 @@ use crate::lang_core::parse::AST;
 #[derive(Debug)]
 pub enum Instruction {
     PUSH(String),
+    PUSHNIL,
     CONCAT(usize),
     SETVAR,
     DEREFVAR,
@@ -13,10 +14,11 @@ pub struct Program {
     pub instructions: Vec<Instruction>
 }
 
-fn ast_bytecode(prog: &mut Program, ast: &AST) {
+fn ast_bytecode(prog: &mut Program, ast: &AST, stackvals: &mut usize) {
     match ast {
         AST::String(s) => {
             prog.instructions.push(Instruction::PUSH(s.to_owned()));
+            *stackvals += 1;
         }
         AST::Function(args) => {
             let name = &args[0];
@@ -42,23 +44,27 @@ fn ast_bytecode(prog: &mut Program, ast: &AST) {
             assert!(args.len() >= 1);
             ast_vec_bytecode(prog, &args[0]);
             prog.instructions.push(Instruction::DEREFVAR);
+            *stackvals += 1;
         }
     }
 }
 
-fn ast_vec_bytecode(prog: &mut Program, ast: &[AST]) {
-    match ast {
-        [] => {
-            prog.instructions.push(Instruction::PUSH(String::from("")));
+fn ast_vec_bytecode(prog: &mut Program, astlist: &[AST]) {
+    let mut stack_vals = 0;
+    for ast in astlist {
+        ast_bytecode(prog, ast, &mut stack_vals);
+    }
+    match stack_vals {
+        0 => {
+            // push dummy value
+            prog.instructions.push(Instruction::PUSHNIL);
         },
-        [a] => {
-            ast_bytecode(prog, a);
+        1 => {
+            // single item remaining already
         },
         _ => {
-            for a in ast {
-                ast_bytecode(prog, a);
-            }
-            prog.instructions.push(Instruction::CONCAT(ast.len() - 1));
+            // concat values to a single item
+            prog.instructions.push(Instruction::CONCAT(stack_vals));
         }
     }
 }
