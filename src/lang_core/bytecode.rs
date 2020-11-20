@@ -19,7 +19,7 @@ pub struct Program {
 fn ast_bytecode(prog: &mut Program, ast: &AST, stackvals: &mut usize) {
     match ast {
         AST::String(s) => {
-            prog.instructions.push(Instruction::PUSH(s.to_owned()));
+            prog.instructions.push(Instruction::PUSHSTR(s.to_owned()));
             *stackvals += 1;
         },
         AST::Function(args) => {
