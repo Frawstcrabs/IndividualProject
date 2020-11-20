@@ -3,9 +3,15 @@ mod lang_core;
 use lang_core::{parse, bytecode, interp};
 
 fn main() {
-    let input = "{set:a;{if:1;b;0;d;1;f;g;};}{a}";
+    let input = "{set:a;{if:0;not {!comment!}run;1;is run;1;not run;else;};}{a}}";
     println!("{:?}", input);
-    let (_, ast) = parse::parse_base(input).unwrap();
+    let ast = match parse::run_parser(input) {
+        Ok(v) => v,
+        Err(_) => {
+            println!("Error parsing code");
+            return;
+        }
+    };
     let mut ctx = interp::Context::new();
     let program = bytecode::generate_bytecode(&ast);
     for (inst, i) in program.instructions.iter().zip(0..) {
