@@ -37,11 +37,11 @@ impl From<&VarValues> for bool {
 }
 
 // todo: add actual garbage collector
-type Gc<T> = Rc<T>;
+type Gc<T> = Rc<RefCell<T>>;
 
 pub struct Context {
-    pub stack: Vec<Gc<RefCell<VarValues>>>,
-    vars: HashMap<String, Gc<RefCell<VarValues>>>,
+    pub stack: Vec<Gc<VarValues>>,
+    vars: HashMap<String, Gc<VarValues>>,
 }
 
 impl Context {
