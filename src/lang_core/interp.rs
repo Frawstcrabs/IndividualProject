@@ -102,7 +102,7 @@ impl VarValues {
                     outer_scope: Some(Gc::clone(&outer_scope)),
                 }));
                 ctx.cur_scope = new_ns;
-                ctx.interpret(&inst[1..]);
+                ctx.interpret(inst);
                 ctx.cur_scope = old_scope;
             },
             VarValues::RustFunc(f) => {
