@@ -1,4 +1,5 @@
 use crate::bytecode::Instruction;
+use crate::builtins::register_builtins;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -9,6 +10,7 @@ pub enum VarValues {
     Str(String),
     Num(f64),
     Func(Vec<Instruction>, Gc<Namespace>),
+    RustFunc(fn(&mut Context, Vec<Gc<VarValues>>) -> Gc<VarValues>),
 }
 
 pub fn f64_to_string(n: f64) -> String {
@@ -31,7 +33,7 @@ impl ToString for VarValues {
             VarValues::Num(v) => {
                 f64_to_string(*v)
             },
-            VarValues::Func(_, _) => {
+            VarValues::Func(_, _) | VarValues::RustFunc(_) => {
                 String::from("<Function>")
             },
         }
@@ -44,7 +46,7 @@ impl From<&VarValues> for bool {
             VarValues::Nil => false,
             VarValues::Str(s) => !s.is_empty() && s != "0",
             VarValues::Num(v) => *v != 0.0,
-            VarValues::Func(_, _) => true,
+            VarValues::Func(_, _) | VarValues::RustFunc(_) => true,
         }
     }
 }
@@ -71,6 +73,11 @@ impl fmt::Debug for VarValues {
                     .field(&format_args!("_"))
                     .finish()
             },
+            VarValues::RustFunc(_) => {
+                fmt.debug_tuple("RustFunc")
+                    .field(&format_args!("_"))
+                    .finish()
+            }
         }
     }
 }
@@ -98,6 +105,10 @@ impl VarValues {
                 ctx.interpret(&inst[1..]);
                 ctx.cur_scope = old_scope;
             },
+            VarValues::RustFunc(f) => {
+                let ret_val = f(ctx, args);
+                ctx.stack.push(ret_val);
+            }
             _ => panic!("tried to call non-function type"),
         }
     }
@@ -129,6 +140,7 @@ pub struct Context {
 impl Context {
     pub fn new() -> Self {
         let mut global_vars = HashMap::new();
+        register_builtins(&mut global_vars);
         let global_scope = Gc::new(RefCell::new(Namespace {
             vars: global_vars,
             outer_scope: None,

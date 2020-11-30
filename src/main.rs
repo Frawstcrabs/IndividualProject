@@ -1,9 +1,10 @@
 mod lang_core;
+mod builtins;
 
 use lang_core::{parse, bytecode, interp};
 
 fn main() {
-    let input = "{func:test;a;b;c;{a}{c}{b};}{test:1;2;3;}";
+    let input = "{add:1;2;3;}";
     println!("{:?}", input);
     let ast = match parse::run_parser(input) {
         Ok(v) => v,
