@@ -3,7 +3,7 @@ mod lang_core;
 use lang_core::{parse, bytecode, interp};
 
 fn main() {
-    let input = "{set:a;{if:0;not {!comment!}run;1;is run;1;not run;else;};}{a}}";
+    let input = "{func:test;a;b;c;{a}{c}{b};}{test:1;2;3;}";
     println!("{:?}", input);
     let ast = match parse::run_parser(input) {
         Ok(v) => v,
@@ -14,7 +14,7 @@ fn main() {
     };
     let mut ctx = interp::Context::new();
     let program = bytecode::generate_bytecode(&ast);
-    for (inst, i) in program.instructions.iter().zip(0..) {
+    for (inst, i) in program.iter().zip(0..) {
         println!("{:<2} - {:?}", i, inst);
     }
     ctx.interpret(&program);

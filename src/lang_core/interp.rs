@@ -1,4 +1,4 @@
-use crate::bytecode::{Program, Instruction};
+use crate::bytecode::Instruction;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
