@@ -146,24 +146,24 @@ fn parse_string(check: impl Fn(char) -> bool) -> impl Fn(&str) -> IResult<&str, 
 }
 
 fn add_block_arg(mut vec: Vec<AST>, r: ASTVariants) -> Vec<AST> {
+    fn try_join_strings(ast: AST, vec: &mut Vec<AST>) {
+        match (&ast, vec.last_mut()) {
+            (AST::String(new_str), Some(AST::String(str))) => {
+                str.push_str(new_str);
+            }
+            _ => vec.push(ast)
+        }
+    }
     match r {
         ASTVariants::ASTValue(ast) => {
-            match (&ast, vec.last_mut()) {
-                (AST::String(new_str), Some(AST::String(str))) => {
-                    str.push_str(new_str);
-                }
-                _ => vec.push(ast)
-            }
+            try_join_strings(ast, &mut vec);
         }
-        ASTVariants::ASTVec(mut ast) => {
-            match (ast.first(), vec.last_mut()) {
-                (Some(AST::String(v)), Some(AST::String(s))) => {
-                    s.push_str(v);
-                    ast.remove(0);
-                }
-                _ => {}
+        ASTVariants::ASTVec(ast) => {
+            let mut iter = ast.into_iter();
+            if let Some(ast) = iter.next() {
+                try_join_strings(ast, &mut vec);
             }
-            vec.append(&mut ast)
+            vec.extend(iter);
         }
     }
     vec
