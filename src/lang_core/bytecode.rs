@@ -91,7 +91,15 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                         ast_vec_bytecode(prog, funcs, &args[1]);
                         ast_compile_function(prog, funcs, &args[2..]);
                         prog.push(Instruction::SETVAR);
-                    }
+                    },
+                    "call" => {
+                        assert!(args.len() >= 2);
+                        *stackvals += 1;
+                        for arg in &args[1..] {
+                            ast_vec_bytecode(prog, funcs, arg);
+                        }
+                        prog.push(Instruction::CALLFUNC(args.len() - 2));
+                    },
                     _ => {
                         *stackvals += 1;
                         ast_function_call(prog, funcs, args);
