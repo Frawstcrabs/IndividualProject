@@ -258,7 +258,7 @@ impl Context {
                     let arg_size = *arg_size;
                     let args = self.stack.split_off(self.stack.len() - arg_size);
                     let called_var = self.stack.pop().unwrap();
-                    called_var.borrow_mut().call(self, args);
+                    called_var.borrow().call(self, args);
                 }
                 Instruction::END => {
                     break;
