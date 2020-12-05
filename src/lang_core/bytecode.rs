@@ -11,6 +11,7 @@ pub enum Instruction {
     CALLFUNC(usize),
     SETVAR,
     DEREFVAR,
+    SETNONLOCAL,
     END,
 }
 
@@ -98,6 +99,12 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                             ast_vec_bytecode(prog, funcs, arg);
                         }
                         prog.push(Instruction::CALLFUNC(args.len() - 2));
+                    },
+                    "nonlocal" => {
+                        // TODO: compile this only inside function bodies
+                        assert!(args.len() == 2);
+                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        prog.push(Instruction::SETNONLOCAL);
                     },
                     _ => {
                         *stackvals += 1;

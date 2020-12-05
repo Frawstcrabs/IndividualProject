@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::lang_core::interp::{VarValues, Gc};
+use crate::lang_core::interp::{VarValues, Gc, VarRefType};
 use std::cell::RefCell;
 
 mod boolean;
@@ -8,7 +8,7 @@ mod math;
 macro_rules! add_func {
     ($vars:expr, $func:expr, $($names:expr),+) => {
         {
-            let val = Gc::new(RefCell::new(VarValues::RustFunc($func)));
+            let val = VarRefType::Value(Gc::new(RefCell::new(VarValues::RustFunc($func))));
             add_func!(__impl $vars, val, $($names),+);
         }
     };
@@ -21,7 +21,7 @@ macro_rules! add_func {
     };
 }
 
-pub fn register_builtins(vars: &mut HashMap<String, Gc<VarValues>>) {
+pub fn register_builtins(vars: &mut HashMap<String, VarRefType>) {
     add_func!(vars, boolean::eq_func, "eq");
     add_func!(vars, math::add_func, "add");
 }

@@ -90,7 +90,7 @@ impl VarValues {
                 let mut vars = HashMap::with_capacity(args.len());
                 assert!(names.len() <= args.len());
                 for i in 0..names.len() {
-                    vars.insert(names[i].clone(), Gc::clone(&args[i]));
+                    vars.insert(names[i].clone(), VarRefType::Value(Gc::clone(&args[i])));
                 }
                 let old_scope = Gc::clone(&ctx.cur_scope);
                 let new_ns = Gc::new(RefCell::new(Namespace {
@@ -113,8 +113,14 @@ impl VarValues {
 // todo: add actual garbage collector
 pub type Gc<T> = Rc<RefCell<T>>;
 
+#[derive(Debug)]
+pub enum VarRefType {
+    Value(Gc<VarValues>),
+    NonLocal,
+}
+
 pub struct Namespace {
-    vars: HashMap<String, Gc<VarValues>>,
+    vars: HashMap<String, VarRefType>,
     outer_scope: Option<Gc<Namespace>>,
 }
 
@@ -209,7 +215,33 @@ impl Context {
                 Instruction::SETVAR => {
                     let value = self.stack.pop().unwrap();
                     let name = self.stack.pop().unwrap().borrow().to_string();
-                    self.cur_scope.borrow_mut().vars.insert(name, value);
+                    let mut ns = Gc::clone(&self.cur_scope);
+                    loop {
+                        let cur_ns = Gc::clone(&ns);
+                        let mut ns_ref = cur_ns.borrow_mut();
+                        match ns_ref.vars.get_mut(&name) {
+                            Some(VarRefType::NonLocal) => match &ns_ref.outer_scope {
+                                Some(new_ns) => {
+                                    ns = Gc::clone(new_ns);
+                                }
+                                None => {
+                                    panic!("no variable reference found");
+                                }
+                            }
+                            Some(VarRefType::Value(v)) => {
+                                *v = value;
+                                break;
+                            }
+                            None => {
+                                ns_ref.vars.insert(name, VarRefType::Value(value));
+                                break;
+                            }
+                        }
+                    }
+                },
+                Instruction::SETNONLOCAL => {
+                    let name = self.stack.pop().unwrap().borrow().to_string();
+                    self.cur_scope.borrow_mut().vars.insert(name, VarRefType::NonLocal);
                 },
                 Instruction::DEREFVAR => {
                     let name = self.stack.pop().unwrap().borrow().to_string();
@@ -219,11 +251,11 @@ impl Context {
                         let cur_ns = Gc::clone(&ns);
                         let ns_ref = cur_ns.borrow();
                         match ns_ref.vars.get(&name) {
-                            Some(v) => {
+                            Some(VarRefType::Value(v)) => {
                                 var_value = Gc::clone(v);
                                 break;
                             }
-                            None => match &ns_ref.outer_scope {
+                            Some(VarRefType::NonLocal) | None => match &ns_ref.outer_scope {
                                 Some(new_ns) => {
                                     ns = Gc::clone(new_ns);
                                 }
