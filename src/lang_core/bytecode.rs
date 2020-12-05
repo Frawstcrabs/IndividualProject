@@ -119,9 +119,9 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
         },
         AST::Variable(args) => {
             //assert!(args.len() >= 1);
+            *stackvals += 1;
             ast_vec_bytecode(prog, funcs, &args[0]);
             prog.push(Instruction::DEREFVAR);
-            *stackvals += 1;
         }
     }
 }

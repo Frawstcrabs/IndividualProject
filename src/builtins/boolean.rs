@@ -10,7 +10,8 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> Gc<VarValues>{
             (VarValues::Nil, VarValues::Nil) => {
                 true
             },
-            (VarValues::Nil, VarValues::Str(s)) | (VarValues::Str(s), VarValues::Nil) => {
+            (VarValues::Nil, VarValues::Str(s)) |
+            (VarValues::Str(s), VarValues::Nil) => {
                 s.is_empty()
             },
             (VarValues::Str(s1), VarValues::Str(s2)) => {
@@ -19,7 +20,8 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> Gc<VarValues>{
             (VarValues::Num(n1), VarValues::Num(n2)) => {
                 n1 == n2
             },
-            (VarValues::Num(n), VarValues::Str(s)) | (VarValues::Str(s), VarValues::Num(n)) => {
+            (VarValues::Num(n), VarValues::Str(s)) |
+            (VarValues::Str(s), VarValues::Num(n)) => {
                 s == &f64_to_string(*n)
             },
             (_, _) => {
