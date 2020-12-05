@@ -7,8 +7,7 @@ pub enum Instruction {
     IFFALSE(usize),
     GOTO(usize),
     CONCAT(usize),
-    FUNCHEADER(Vec<String>),
-    CREATEFUNC(usize, usize),
+    CREATEFUNC(Vec<String>, usize, usize),
     CALLFUNC(usize),
     SETVAR,
     DEREFVAR,
@@ -132,13 +131,13 @@ fn ast_compile_function(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec
             }
         }
     }
-    let mut body_code = vec![Instruction::FUNCHEADER(arg_names)];
+    let mut body_code = Vec::new();
     let mut inner_funcs = Vec::new();
     ast_vec_bytecode(&mut body_code, &mut inner_funcs, &args[args.len() - 1]);
     body_code.push(Instruction::END);
     ast_link_functions(&mut body_code, inner_funcs);
     let current_len = prog.len();
-    prog.push(Instruction::CREATEFUNC(0, 0));
+    prog.push(Instruction::CREATEFUNC(arg_names, 0, 0));
     funcs.push((current_len, body_code));
 }
 
@@ -146,7 +145,7 @@ fn ast_link_functions(prog: &mut Vec<Instruction>, funcs: Vec<(usize, Vec<Instru
     for (func_offset, inst) in funcs {
         let current_len = prog.len();
         match &mut prog[func_offset] {
-            Instruction::CREATEFUNC(offset, size) => {
+            Instruction::CREATEFUNC(_, offset, size) => {
                 *offset = current_len;
                 *size = inst.len();
             },

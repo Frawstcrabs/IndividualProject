@@ -9,7 +9,7 @@ pub enum VarValues {
     Nil,
     Str(String),
     Num(f64),
-    Func(Vec<Instruction>, Gc<Namespace>),
+    Func(Vec<String>, Vec<Instruction>, Gc<Namespace>),
     RustFunc(fn(&mut Context, Vec<Gc<VarValues>>) -> Gc<VarValues>),
 }
 
@@ -33,7 +33,7 @@ impl ToString for VarValues {
             VarValues::Num(v) => {
                 f64_to_string(*v)
             },
-            VarValues::Func(_, _) | VarValues::RustFunc(_) => {
+            VarValues::Func(_, _, _) | VarValues::RustFunc(_) => {
                 String::from("<Function>")
             },
         }
@@ -46,7 +46,7 @@ impl From<&VarValues> for bool {
             VarValues::Nil => false,
             VarValues::Str(s) => !s.is_empty() && s != "0",
             VarValues::Num(v) => *v != 0.0,
-            VarValues::Func(_, _) | VarValues::RustFunc(_) => true,
+            VarValues::Func(_, _, _) | VarValues::RustFunc(_) => true,
         }
     }
 }
@@ -67,8 +67,9 @@ impl fmt::Debug for VarValues {
                     .field(n)
                     .finish()
             },
-            VarValues::Func(inst, _) => {
+            VarValues::Func(names, inst, _) => {
                 fmt.debug_tuple("Func")
+                    .field(names)
                     .field(inst)
                     .field(&format_args!("_"))
                     .finish()
@@ -85,16 +86,11 @@ impl fmt::Debug for VarValues {
 impl VarValues {
     fn call(&self, ctx: &mut Context, args: Vec<Gc<VarValues>>) {
         match self {
-            VarValues::Func(inst, outer_scope) => {
+            VarValues::Func(names, inst, outer_scope) => {
                 let mut vars = HashMap::with_capacity(args.len());
-                match &inst[0] {
-                    Instruction::FUNCHEADER(names) => {
-                        assert!(names.len() <= args.len());
-                        for i in 0..names.len() {
-                            vars.insert(names[i].clone(), Gc::clone(&args[i]));
-                        }
-                    },
-                    _ => unreachable!(),
+                assert!(names.len() <= args.len());
+                for i in 0..names.len() {
+                    vars.insert(names[i].clone(), Gc::clone(&args[i]));
                 }
                 let old_scope = Gc::clone(&ctx.cur_scope);
                 let new_ns = Gc::new(RefCell::new(Namespace {
@@ -240,26 +236,23 @@ impl Context {
                     }
                     self.stack.push(var_value);
                 },
-                Instruction::FUNCHEADER(_) => {
-                    // this is just for holding data
-                    // is a no-op
-                }
-                Instruction::CREATEFUNC(loc, size) => {
+                Instruction::CREATEFUNC(arg_names, loc, size) => {
                     let loc = *loc;
                     let size = *size;
                     self.stack.push(
                         Gc::new(RefCell::new(VarValues::Func(
+                            arg_names.clone(),
                             prog[loc..loc+size].to_vec(),
                             Gc::clone(&self.cur_scope)
                         )))
                     );
-                }
+                },
                 Instruction::CALLFUNC(arg_size) => {
                     let arg_size = *arg_size;
                     let args = self.stack.split_off(self.stack.len() - arg_size);
                     let called_var = self.stack.pop().unwrap();
                     called_var.borrow().call(self, args);
-                }
+                },
                 Instruction::END => {
                     break;
                 },
