@@ -1,16 +1,15 @@
 extern crate nom;
 use nom::{
-    IResult,
+    IResult, Err, InputTake, FindSubstring, InputLength,
+    error::{ParseError, ErrorKind},
     multi::{many0, fold_many0, separated_list},
     bytes::complete::{tag, take_until, take_till1},
-    combinator::{not, map},
-    character::complete::{char, anychar},
-    branch::alt
+    combinator::{not, map, opt},
+    character::complete::{char, anychar, multispace0, line_ending},
+    branch::alt,
+    sequence::{pair, delimited},
 };
 use std::borrow::Cow;
-use nom::Err;
-use nom::{InputTake, FindSubstring, InputLength};
-use nom::error::{ParseError, ErrorKind};
 
 #[derive(Clone, Debug)]
 pub enum AST {
@@ -91,9 +90,13 @@ fn take_until1_or_eof<T, Input, Error: ParseError<Input>>(
 }
 
 fn remove_comments(input: &str) -> Result<String, ()> {
-    let (rem, strings) = separated_list(
-        parse_comment,
-        take_until_or_eof("{!")
+    let (rem, strings) = delimited(
+        opt(parse_comment),
+        separated_list(
+            parse_comment,
+            take_until_or_eof("{!")
+        ),
+        opt(parse_comment)
     )(input).map_err(|_| ())?;
     if rem.len() > 0 {
         return Err(());
@@ -266,7 +269,7 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
     Ok((input, body))
 }
 
-pub fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
+fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
     fold_many0(
         alt((
             map(parse_string(|c| c == '{'), |s| ASTVariants::ASTValue(AST::String(s))),
@@ -278,8 +281,38 @@ pub fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
     )(input)
 }
 
+fn parse_oneline(input: String) -> Result<String, ()> {
+    fn check_oneline(inp: &str) -> IResult<&str, &str> {
+        let (input, _) = multispace0(inp)?;
+        tag("{!>oneline}")(input)
+    }
+
+    if let Ok((input, _)) = check_oneline(&input) {
+        let (rem, strings) = delimited(
+            multispace0,
+            separated_list(
+                pair(line_ending, multispace0),
+                take_till1(|c| c == '\r' || c == '\n')
+            ),
+            multispace0
+        )(input).map_err(|_: Err<()>| ())?;
+        if rem.len() > 0 {
+            return Err(());
+        }
+        let size = strings.iter().map(|s| s.len()).sum();
+        let mut ret = String::with_capacity(size);
+        for s in strings {
+            ret.push_str(s);
+        }
+        Ok(ret)
+    } else {
+        Ok(input)
+    }
+}
+
 pub fn run_parser(input: &str) -> Result<Vec<AST>, ()> {
-    let input = remove_comments(input)?;
+    let input = parse_oneline(input.to_owned())?;
+    let input = remove_comments(&input)?;
     let input = handle_escapes(&input)?;
     match parse_base(&input) {
         Ok((rem, ast)) => {

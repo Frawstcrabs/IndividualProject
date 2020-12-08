@@ -4,7 +4,14 @@ mod builtins;
 use lang_core::{parse, bytecode, interp};
 
 fn main() {
-    let input = "{call:{lambda:a;{if:{a};true;false;};};1;}";
+    let input = "
+    {!>oneline}
+
+    {func:example;a;b;c;
+        {a} {c} {b}
+    ;}
+
+    {example:1;2;3;}";
     println!("{:?}", input);
     let ast = match parse::run_parser(input) {
         Ok(v) => v,
