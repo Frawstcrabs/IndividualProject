@@ -111,7 +111,7 @@ fn remove_comments(input: &str) -> Result<String, ()> {
 
 fn handle_escapes(input: &str) -> Result<String, ()> {
     let (rem, strings) = many0(alt((
-        map(parse_escaped_char, Cow::Owned),
+        parse_escaped_char,
         map(take_until1_or_eof("\\"), Cow::Borrowed)
     )))(input).map_err(|_| ())?;
     if rem.len() > 0 {
@@ -125,17 +125,15 @@ fn handle_escapes(input: &str) -> Result<String, ()> {
     Ok(ret)
 }
 
-fn parse_escaped_char(input: &str) -> IResult<&str, String> {
-    let (input, _) = char('\\')(input)?;
+fn parse_escaped_char(inp: &str) -> IResult<&str, Cow<str>> {
+    let (input, _) = char('\\')(inp)?;
     let (input, c) = anychar(input)?;
 
     let escaped_c = match c {
-        '{' | '}' | ':' | ';' | '\\' | '>' => c.to_string(),
-        'n' => String::from("\n"),
+        '{' | '}' | ':' | ';' | '\\' | '>' => Cow::Owned(c.to_string()),
+        'n' => Cow::Owned(String::from("\n")),
         _ => {
-            let mut ret = String::from("\\");
-            ret.push(c);
-            ret
+            Cow::Borrowed(&inp[..c.len_utf8()+1])
         }
     };
 
