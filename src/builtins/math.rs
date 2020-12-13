@@ -1,8 +1,14 @@
-use crate::lang_core::interp::{VarValues, Context, Gc};
+use crate::lang_core::interp::{LangResult, LangError, VarValues, Context, Gc};
 use std::cell::RefCell;
 
-pub fn add_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> Gc<VarValues> {
-    assert!(!args.is_empty());
+pub fn add_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    if args.len() < 2 {
+        return Err(LangError::Throw(
+            Gc::new(RefCell::new(
+                VarValues::Str(format!("<add:expected 2 args, got {}>", args.len()))
+            ))
+        ));
+    }
 
     let mut ret = 0.0;
 
@@ -12,11 +18,26 @@ pub fn add_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> Gc<VarValues> {
                 ret += *n;
             },
             VarValues::Str(s) => {
-                ret += s.parse::<f64>().unwrap();
+                ret += match s.parse::<f64>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return Err(LangError::Throw(
+                            Gc::new(RefCell::new(
+                                VarValues::Str(String::from("<add:invalid number>"))
+                            ))
+                        ));
+                    }
+                };
             },
-            _ => panic!("something that isnt a number was passed"),
+            _ => {
+                return Err(LangError::Throw(
+                    Gc::new(RefCell::new(
+                        VarValues::Str(String::from("<add:invalid number>"))
+                    ))
+                ));
+            },
         }
     }
 
-    Gc::new(RefCell::new(VarValues::Num(ret)))
+    Ok(Gc::new(RefCell::new(VarValues::Num(ret))))
 }

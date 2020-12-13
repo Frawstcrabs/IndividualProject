@@ -1,8 +1,14 @@
-use crate::lang_core::interp::{VarValues, Context, Gc, f64_to_string};
+use crate::lang_core::interp::{LangResult, LangError, VarValues, Context, Gc, f64_to_string};
 use std::cell::RefCell;
 
-pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> Gc<VarValues>{
-    assert!(!args.is_empty());
+pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    if args.len() < 2 {
+        return Err(LangError::Throw(
+            Gc::new(RefCell::new(
+                VarValues::Str(format!("<eq:expected 2 args, got {}>", args.len()))
+            ))
+        ));
+    }
 
     let mut item1 = &args[0];
     for item2 in &args[1..] {
@@ -29,10 +35,10 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> Gc<VarValues>{
             },
         };
         if !comp {
-            return Gc::new(RefCell::new(VarValues::Num(0.0)));
+            return Ok(Gc::new(RefCell::new(VarValues::Num(0.0))));
         }
         item1 = item2;
     }
 
-    Gc::new(RefCell::new(VarValues::Num(1.0)))
+    Ok(Gc::new(RefCell::new(VarValues::Num(1.0))))
 }

@@ -15,7 +15,7 @@ use std::borrow::Cow;
 pub enum AST {
     String(String),
     Function(Vec<Vec<AST>>),
-    Variable(Vec<Vec<AST>>)
+    Variable(Vec<Vec<AST>>),
 }
 
 enum ASTVariants {

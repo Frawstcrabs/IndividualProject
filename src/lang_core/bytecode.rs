@@ -12,6 +12,9 @@ pub enum Instruction {
     SETVAR,
     DEREFVAR,
     SETNONLOCAL,
+    STARTCATCH(usize),
+    ENDCATCH,
+    THROWVAL,
     END,
 }
 
@@ -105,6 +108,25 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                         assert!(args.len() == 2);
                         ast_vec_bytecode(prog, funcs, &args[1]);
                         prog.push(Instruction::SETNONLOCAL);
+                    },
+                    "throw" => {
+                        assert!(args.len() == 2);
+                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        prog.push(Instruction::THROWVAL);
+                    },
+                    "catch" => {
+                        assert!(args.len() == 2);
+                        let startcatch_index = prog.len();
+                        prog.push(Instruction::STARTCATCH(0));
+                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        prog.push(Instruction::ENDCATCH);
+                        let current_len = prog.len();
+                        match &mut prog[startcatch_index] {
+                            Instruction::STARTCATCH(loc) => {
+                                *loc = current_len;
+                            }
+                            _ => unreachable!()
+                        }
                     },
                     _ => {
                         *stackvals += 1;
