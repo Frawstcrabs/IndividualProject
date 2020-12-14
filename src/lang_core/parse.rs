@@ -26,17 +26,31 @@ enum ASTVariants {
 fn parse_comment(input: &str) -> IResult<&str, ()> {
     let (input, _) = tag("{!")(input)?;
 
-    pub fn parse_comment_str(input: &str) -> IResult<&str, ()> {
+    fn parse_comment_str(input: &str) -> IResult<&str, ()> {
         let (input, _) = not(
             alt((tag("{!"), tag("!}")))
         )(input)?;
 
-        let (input, _) = alt((
-            take_until("{!"),
-            take_until("!}")
-        ))(input)?;
-
-        Ok((input, ()))
+        let (input1, test1) = opt(take_until("{!"))(input)?;
+        let (input2, test2) = opt(take_until("!}"))(input)?;
+        match (test1, test2) {
+            (None, None) => {
+                panic!("unclosed comment")
+            },
+            (Some(_), None) => {
+                Ok((input1, ()))
+            },
+            (None, Some(_)) => {
+                Ok((input2, ()))
+            },
+            (Some(_), Some(_)) => {
+                if input1.len() > input2.len() {
+                    Ok((input1, ()))
+                } else {
+                    Ok((input2, ()))
+                }
+            }
+        }
     }
 
     let (input, _) = many0(
@@ -64,6 +78,27 @@ fn take_until_or_eof<T, Input, Error: ParseError<Input>>(
     }
 }
 
+fn remove_comments(input: &str) -> Result<String, ()> {
+    let (rem, strings) = delimited(
+        opt(parse_comment),
+        separated_list(
+            parse_comment,
+            take_until_or_eof("{!")
+        ),
+        opt(parse_comment)
+    )(input).map_err(|_| ())?;
+    if rem.len() > 0 {
+        return Err(());
+    }
+    let size = strings.iter().map(|s| s.len()).sum();
+    let mut ret = String::with_capacity(size);
+    for s in strings {
+        ret.push_str(s);
+    }
+    Ok(ret)
+}
+
+/*
 fn take_until1_or_eof<T, Input, Error: ParseError<Input>>(
     tag: T,
 ) -> impl Fn(Input) -> IResult<Input, Input, Error>
@@ -87,26 +122,6 @@ fn take_until1_or_eof<T, Input, Error: ParseError<Input>>(
         };
         res
     }
-}
-
-fn remove_comments(input: &str) -> Result<String, ()> {
-    let (rem, strings) = delimited(
-        opt(parse_comment),
-        separated_list(
-            parse_comment,
-            take_until_or_eof("{!")
-        ),
-        opt(parse_comment)
-    )(input).map_err(|_| ())?;
-    if rem.len() > 0 {
-        return Err(());
-    }
-    let size = strings.iter().map(|s| s.len()).sum();
-    let mut ret = String::with_capacity(size);
-    for s in strings {
-        ret.push_str(s);
-    }
-    Ok(ret)
 }
 
 fn handle_escapes(input: &str) -> Result<String, ()> {
