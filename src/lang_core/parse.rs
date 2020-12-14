@@ -1,21 +1,35 @@
 extern crate nom;
 use nom::{
     IResult, Err, InputTake, FindSubstring, InputLength,
-    error::{ParseError, ErrorKind},
-    multi::{many0, fold_many0, separated_list},
+    error::ParseError,
+    multi::{many0, many1, fold_many0, separated_list},
     bytes::complete::{tag, take_until, take_till1},
-    combinator::{not, map, opt},
+    combinator::{not, map, opt, peek},
     character::complete::{char, anychar, multispace0, line_ending},
     branch::alt,
-    sequence::{pair, delimited},
+    sequence::{pair, delimited, preceded},
 };
 use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
 pub enum AST {
     String(String),
-    Function(Vec<Vec<AST>>),
-    Variable(Vec<Vec<AST>>),
+    Variable(VarAccess, Vec<Vec<AST>>),
+    Function(VarAccess, Vec<Vec<AST>>),
+    SetVar(VarAccess, Vec<AST>),
+    DelVar(VarAccess),
+}
+
+#[derive(Clone, Debug)]
+pub enum AccessorType {
+    Index,
+    Attr,
+}
+
+#[derive(Clone, Debug)]
+pub struct VarAccess {
+    pub(crate) value: Vec<AST>,
+    pub(crate) accessors: Vec<(AccessorType, Vec<AST>)>,
 }
 
 enum ASTVariants {
@@ -158,6 +172,41 @@ fn add_block_arg(mut vec: Vec<AST>, r: ASTVariants) -> Vec<AST> {
     }
     vec
 }
+macro_rules! match_strings {
+    ($($str:expr),+) => {
+        alt((
+            $(tag($str)),+
+        ))
+    };
+}
+
+fn parse_var_access(input: &str) -> IResult<&str, VarAccess> {
+    let (input, value) = parse_block_arg(&['.', '[', ':', ';', '{', '}'])(input)?;
+    let (input, end) = peek(opt(match_strings!(".", "[", ":", ";", "}")))(input)?;
+
+    match end {
+        Some(":") | Some(";") | Some("}") => {
+            // no accessors
+            Ok((input, VarAccess {value, accessors: Vec::new()}))
+        },
+        Some(".") | Some("[") => {
+            let (input, accessors) = many0(alt((
+                map(
+                    preceded(tag("."), parse_block_arg(&['{', '.', '['])),
+                    |v| (AccessorType::Attr, v)
+                ),
+                map(
+                    delimited(tag("["), parse_block_arg(&['{', ']']), tag("]")),
+                    |v| (AccessorType::Index, v)
+                )
+            )))(input)?;
+            Ok((input, VarAccess {value, accessors}))
+        },
+        _ => {
+            panic!("invalid character in var accessor");
+        }
+    }
+}
 
 fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> + '_ {
     move |i: &str| {
@@ -165,6 +214,9 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
             alt((
                 map(parse_string(chars), |s| ASTVariants::ASTValue(AST::String(s))),
                 map(parse_escaped_block, ASTVariants::ASTVec),
+                map(parse_set_block, ASTVariants::ASTValue),
+                map(parse_del_block, ASTVariants::ASTValue),
+                map(parse_func_block, ASTVariants::ASTValue),
                 map(parse_block, ASTVariants::ASTValue)
             )),
             Vec::new(),
@@ -199,32 +251,66 @@ fn parse_block_args(mut input: &str) -> IResult<&str, (Vec<Vec<AST>>, &str)> {
     }
 }
 
+fn parse_set_block(input: &str) -> IResult<&str, AST> {
+    let (input, _) = tag("{set:")(input)?;
+    let (input, access) = parse_var_access(input)?;
+    let (input, _) = tag(";")(input)?;
+    let (input, val) = parse_block_arg(&['{',';','}'])(input)?;
+    let (input, _) = tag(";}")(input)?;
+    Ok((input, AST::SetVar(access, val)))
+}
+
+fn parse_del_block(input: &str) -> IResult<&str, AST> {
+    let (input, _) = tag("{del:")(input)?;
+    let (input, access) = parse_var_access(input)?;
+    let (input, _) = tag(";}")(input)?;
+    Ok((input, AST::DelVar(access)))
+}
+
+fn parse_func_block(input: &str) -> IResult<&str, AST> {
+    let (input, _) = tag("{func:")(input)?;
+    let (input, access) = parse_var_access(input)?;
+    let (input, _) = tag(";")(input)?;
+    let (input, (args, s)) = parse_block_args(input)?;
+    match s {
+        ";}" => {
+            Ok((input, AST::SetVar(access, vec![
+                AST::Function(
+                    VarAccess {
+                        value: vec![AST::String(String::from("lambda"))],
+                        accessors: vec![]
+                    },
+                    args
+                )
+            ])))
+        },
+        "}" => {
+            panic!("uh")
+        }
+        _ => unreachable!(),
+    }
+}
+
 fn parse_block(input: &str) -> IResult<&str, AST> {
     let (input, _) = char('{')(input)?;
     not(char('!'))(input)?;
     not(char('>'))(input)?;
 
-    let (input, arg1) = parse_block_arg(&['{',':',';','}'])(input)?;
+    let (input, var) = parse_var_access(input)?;
 
-    let (input, sep) = alt((
-        tag(":"),
-        tag(";}"),
-        tag("}"),
-        tag(";")
-    ))(input)?;
+    let (input, sep) = match_strings!(":", ";}", "}", ";")(input)?;
 
     match sep {
         ":" => {
-            let (input, (mut args, end)) = parse_block_args(input)?;
-            args.insert(0, arg1);
+            let (input, (args, end)) = parse_block_args(input)?;
             match end {
-                ";}" => Ok((input, AST::Function(args))),
-                "}"  => Ok((input, AST::Variable(args))),
+                ";}" => Ok((input, AST::Function(var, args))),
+                "}"  => Ok((input, AST::Variable(var, args))),
                 _    => unreachable!()
             }
         },
-        ";}" => Ok((input, AST::Function(vec![arg1]))),
-        "}"  => Ok((input, AST::Variable(vec![arg1]))),
+        ";}" => Ok((input, AST::Function(var, Vec::new()))),
+        "}"  => Ok((input, AST::Variable(var, Vec::new()))),
         ";" => {
             let (input, _) = parse_block_args(input)?;
             Ok((input, AST::String(String::from("<error:missing semicolon>"))))
@@ -239,6 +325,9 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
         alt((
             map(parse_string(&['{', '}']), |s| ASTVariants::ASTValue(AST::String(s))),
             map(parse_escaped_block, ASTVariants::ASTVec),
+            map(parse_set_block, ASTVariants::ASTValue),
+            map(parse_del_block, ASTVariants::ASTValue),
+            map(parse_func_block, ASTVariants::ASTValue),
             map(parse_block, ASTVariants::ASTValue)
         )),
         vec![AST::String(String::from("{"))],
@@ -261,6 +350,9 @@ fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
         alt((
             map(parse_string(&['{']), |s| ASTVariants::ASTValue(AST::String(s))),
             map(parse_escaped_block, ASTVariants::ASTVec),
+            map(parse_set_block, ASTVariants::ASTValue),
+            map(parse_del_block, ASTVariants::ASTValue),
+            map(parse_func_block, ASTVariants::ASTValue),
             map(parse_block, ASTVariants::ASTValue)
         )),
         Vec::new(),
@@ -300,7 +392,6 @@ fn parse_oneline(input: String) -> Result<String, ()> {
 pub fn run_parser(input: &str) -> Result<Vec<AST>, ()> {
     let input = parse_oneline(input.to_owned())?;
     let input = remove_comments(&input)?;
-    let input = handle_escapes(&input)?;
     match parse_base(&input) {
         Ok((rem, ast)) => {
             if rem.len() == 0 {
@@ -309,6 +400,9 @@ pub fn run_parser(input: &str) -> Result<Vec<AST>, ()> {
                 Err(())
             }
         },
-        Err(_) => Err(()),
+        Err(v) => {
+            println!("parse error: {:?}", v);
+            Err(())
+        },
     }
 }

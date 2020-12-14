@@ -248,11 +248,17 @@ impl Context {
                     }
                 }
             },
+            Instruction::SETATTR => {
+
+            },
+            Instruction::SETINDEX => {
+
+            },
             Instruction::SETNONLOCAL => {
                 let name = self.stack.pop().unwrap().borrow().to_string();
                 self.cur_scope.borrow_mut().vars.insert(name, VarRefType::NonLocal);
             },
-            Instruction::DEREFVAR => {
+            Instruction::GETVAR => {
                 let name = self.stack.pop().unwrap().borrow().to_string();
                 let mut ns = Gc::clone(&self.cur_scope);
                 let var_value;
@@ -276,6 +282,21 @@ impl Context {
                     }
                 }
                 self.stack.push(var_value);
+            }
+            Instruction::GETATTR => {
+
+            },
+            Instruction::GETINDEX => {
+
+            },
+            Instruction::DELVAR => {
+
+            },
+            Instruction::DELATTR => {
+
+            },
+            Instruction::DELINDEX => {
+
             },
             Instruction::CREATEFUNC(arg_names, loc, size) => {
                 let loc = *loc;

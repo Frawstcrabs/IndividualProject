@@ -1,4 +1,4 @@
-use crate::lang_core::parse::AST;
+use crate::lang_core::parse::{AST, VarAccess, AccessorType};
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -9,13 +9,43 @@ pub enum Instruction {
     CONCAT(usize),
     CREATEFUNC(Vec<String>, usize, usize),
     CALLFUNC(usize),
+    GETVAR,
+    GETINDEX,
+    GETATTR,
     SETVAR,
-    DEREFVAR,
+    SETINDEX,
+    SETATTR,
+    DELVAR,
+    DELINDEX,
+    DELATTR,
     SETNONLOCAL,
     STARTCATCH(usize),
     ENDCATCH,
     THROWVAL,
     END,
+}
+
+fn ast_var_access(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, var: &VarAccess) {
+    match &var.value[..] {
+        [AST::String(s)] => {
+            prog.push(Instruction::PUSHSTR(s.to_owned()));
+            prog.push(Instruction::GETVAR);
+        },
+        _ => {
+            ast_vec_bytecode(prog, funcs, &var.value);
+        },
+    }
+    for (t, name) in &var.accessors {
+        ast_vec_bytecode(prog, funcs, name);
+        match t {
+            AccessorType::Index => {
+                prog.push(Instruction::GETINDEX);
+            },
+            AccessorType::Attr => {
+                prog.push(Instruction::GETATTR);
+            },
+        }
+    }
 }
 
 fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, ast: &AST, stackvals: &mut usize) {
@@ -24,21 +54,13 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
             prog.push(Instruction::PUSHSTR(s.to_owned()));
             *stackvals += 1;
         },
-        AST::Function(args) => {
-            assert!(!args.is_empty());
-            let name = &args[0];
-            match &name[..] {
-                [AST::String(s)] => match &s[..] {
-                    "set" => {
-                        assert_eq!(args.len(), 3);
-                        ast_vec_bytecode(prog, funcs, &args[1]);
-                        ast_vec_bytecode(prog, funcs, &args[2]);
-                        prog.push(Instruction::SETVAR);
-                    },
+        AST::Function(var, args) => {
+            match (&var.value[..], &var.accessors[..]) {
+                ([AST::String(s)], []) => match &s[..] {
                     "if" => {
-                        assert!(args.len() >= 3);
+                        assert!(args.len() >= 2);
                         *stackvals += 1;
-                        let mut i = 1;
+                        let mut i = 0;
                         let mut end_jumps = Vec::new();
                         let mut prev_jump: usize;
                         while i < args.len() {
@@ -66,7 +88,7 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                             }
                             i += 1;
                         }
-                        if args.len() % 2 == 1 {
+                        if args.len() % 2 == 0 {
                             // no else branch given, add a nil for a placeholder
                             prog.push(Instruction::PUSHNIL);
                         }
@@ -82,43 +104,29 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                         }
                     },
                     "lambda" => {
-                        assert!(args.len() >= 2);
+                        assert!(args.len() >= 1);
                         // all args before last are parameters
                         // must be literal strings and not variable/function calls
                         // last arg is the function body
                         *stackvals += 1;
-                        ast_compile_function(prog, funcs, &args[1..]);
-                    },
-                    "func" => {
-                        assert!(args.len() >= 3);
-                        ast_vec_bytecode(prog, funcs, &args[1]);
-                        ast_compile_function(prog, funcs, &args[2..]);
-                        prog.push(Instruction::SETVAR);
-                    },
-                    "call" => {
-                        assert!(args.len() >= 2);
-                        *stackvals += 1;
-                        for arg in &args[1..] {
-                            ast_vec_bytecode(prog, funcs, arg);
-                        }
-                        prog.push(Instruction::CALLFUNC(args.len() - 2));
+                        ast_compile_function(prog, funcs, args);
                     },
                     "nonlocal" => {
                         // TODO: compile this only inside function bodies
-                        assert!(args.len() == 2);
-                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        assert!(args.len() == 1);
+                        ast_vec_bytecode(prog, funcs, &args[0]);
                         prog.push(Instruction::SETNONLOCAL);
                     },
                     "throw" => {
-                        assert!(args.len() == 2);
-                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        assert!(args.len() == 1);
+                        ast_vec_bytecode(prog, funcs, &args[0]);
                         prog.push(Instruction::THROWVAL);
                     },
                     "catch" => {
-                        assert!(args.len() == 2);
+                        assert!(args.len() == 1);
                         let startcatch_index = prog.len();
                         prog.push(Instruction::STARTCATCH(0));
-                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        ast_vec_bytecode(prog, funcs, &args[0]);
                         prog.push(Instruction::ENDCATCH);
                         let current_len = prog.len();
                         match &mut prog[startcatch_index] {
@@ -130,21 +138,144 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                     },
                     _ => {
                         *stackvals += 1;
-                        ast_function_call(prog, funcs, args);
+                        ast_function_call(prog, funcs, var, args);
                     },
                 },
                 _ => {
                     *stackvals += 1;
-                    ast_function_call(prog, funcs, args);
+                    ast_function_call(prog, funcs, var, args);
                 },
             }
         },
-        AST::Variable(args) => {
-            //assert!(args.len() >= 1);
+        AST::SetVar(var, val) => {
+            match (&var.value[..], &var.accessors[..]) {
+                ([AST::String(s)], []) => {
+                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                    ast_vec_bytecode(prog, funcs, val);
+                    prog.push(Instruction::SETVAR);
+                },
+                ([AST::String(s)], _) => {
+                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                    prog.push(Instruction::GETVAR);
+                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
+                        ast_vec_bytecode(prog, funcs, name);
+                        match t {
+                            AccessorType::Index => {
+                                prog.push(Instruction::GETINDEX);
+                            },
+                            AccessorType::Attr => {
+                                prog.push(Instruction::GETATTR);
+                            },
+                        }
+                    }
+                    let (t, name) = var.accessors.last().unwrap();
+                    ast_vec_bytecode(prog, funcs, name);
+                    ast_vec_bytecode(prog, funcs, val);
+                    match t {
+                        AccessorType::Index => {
+                            prog.push(Instruction::SETINDEX);
+                        },
+                        AccessorType::Attr => {
+                            prog.push(Instruction::SETATTR);
+                        },
+                    }
+                },
+                (_, []) => {
+                    ast_vec_bytecode(prog, funcs, &var.value);
+                    ast_vec_bytecode(prog, funcs, val);
+                    prog.push(Instruction::SETVAR);
+                }
+                _ => {
+                    ast_vec_bytecode(prog, funcs, &var.value);
+                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
+                        ast_vec_bytecode(prog, funcs, name);
+                        match t {
+                            AccessorType::Index => {
+                                prog.push(Instruction::GETINDEX);
+                            },
+                            AccessorType::Attr => {
+                                prog.push(Instruction::GETATTR);
+                            },
+                        }
+                    }
+                    let (t, name) = var.accessors.last().unwrap();
+                    ast_vec_bytecode(prog, funcs, name);
+                    ast_vec_bytecode(prog, funcs, val);
+                    match t {
+                        AccessorType::Index => {
+                            prog.push(Instruction::SETINDEX);
+                        },
+                        AccessorType::Attr => {
+                            prog.push(Instruction::SETATTR);
+                        },
+                    }
+                },
+            }
+        },
+        AST::DelVar(var) => {
+            match (&var.value[..], &var.accessors[..]) {
+                ([AST::String(s)], []) => {
+                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                    prog.push(Instruction::DELVAR);
+                },
+                ([AST::String(s)], _) => {
+                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                    prog.push(Instruction::GETVAR);
+                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
+                        ast_vec_bytecode(prog, funcs, name);
+                        match t {
+                            AccessorType::Index => {
+                                prog.push(Instruction::GETINDEX);
+                            },
+                            AccessorType::Attr => {
+                                prog.push(Instruction::GETATTR);
+                            },
+                        }
+                    }
+                    let (t, name) = var.accessors.last().unwrap();
+                    ast_vec_bytecode(prog, funcs, name);
+                    match t {
+                        AccessorType::Index => {
+                            prog.push(Instruction::DELINDEX);
+                        },
+                        AccessorType::Attr => {
+                            prog.push(Instruction::DELATTR);
+                        },
+                    }
+                },
+                (_, []) => {
+                    panic!("invalid {del;} call");
+                }
+                _ => {
+                    ast_vec_bytecode(prog, funcs, &var.value);
+                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
+                        ast_vec_bytecode(prog, funcs, name);
+                        match t {
+                            AccessorType::Index => {
+                                prog.push(Instruction::GETINDEX);
+                            },
+                            AccessorType::Attr => {
+                                prog.push(Instruction::GETATTR);
+                            },
+                        }
+                    }
+                    let (t, name) = var.accessors.last().unwrap();
+                    ast_vec_bytecode(prog, funcs, name);
+                    match t {
+                        AccessorType::Index => {
+                            prog.push(Instruction::DELINDEX);
+                        },
+                        AccessorType::Attr => {
+                            prog.push(Instruction::DELATTR);
+                        },
+                    }
+                },
+            }
+        },
+        AST::Variable(var, _args) => {
+            ast_var_access(prog, funcs, var);
             *stackvals += 1;
-            ast_vec_bytecode(prog, funcs, &args[0]);
-            prog.push(Instruction::DEREFVAR);
-        }
+        },
     }
 }
 
@@ -184,13 +315,17 @@ fn ast_link_functions(prog: &mut Vec<Instruction>, funcs: Vec<(usize, Vec<Instru
     }
 }
 
-fn ast_function_call(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, args: &[Vec<AST>]) {
-    ast_vec_bytecode(prog, funcs, &args[0]);
-    prog.push(Instruction::DEREFVAR);
-    for ast in &args[1..] {
+fn ast_function_call(
+    prog: &mut Vec<Instruction>,
+    funcs: &mut Vec<(usize, Vec<Instruction>)>,
+    var: &VarAccess,
+    args: &[Vec<AST>])
+{
+    ast_var_access(prog, funcs, var);
+    for ast in args {
         ast_vec_bytecode(prog, funcs, ast);
     }
-    prog.push(Instruction::CALLFUNC(args.len() - 1));
+    prog.push(Instruction::CALLFUNC(args.len()));
 }
 
 fn ast_vec_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, astlist: &[AST]) {
