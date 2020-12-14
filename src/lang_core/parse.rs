@@ -98,66 +98,40 @@ fn remove_comments(input: &str) -> Result<String, ()> {
     Ok(ret)
 }
 
-/*
-fn take_until1_or_eof<T, Input, Error: ParseError<Input>>(
-    tag: T,
-) -> impl Fn(Input) -> IResult<Input, Input, Error>
-    where
-        Input: InputTake + InputLength + FindSubstring<T>,
-        T: InputLength + Clone,
-{
-    move |i: Input| {
-        let t = tag.clone();
-        let res: IResult<_, _, Error> = match i.find_substring(t) {
-            None => if i.input_len() > 0 {
-                Ok(i.take_split(i.input_len()))
-            } else {
-                Err(Err::Error(Error::from_error_kind(i, ErrorKind::TakeUntil)))
-            },
-            Some(index) => if index > 0 {
-                Ok(i.take_split(index))
-            } else {
-                Err(Err::Error(Error::from_error_kind(i, ErrorKind::TakeUntil)))
-            },
-        };
-        res
-    }
-}
+fn parse_escaped_char(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Cow<str>> + '_ {
+    move |init_input: &str| {
+        let (input, _) = char('\\')(init_input)?;
+        let (input, c) = anychar(input)?;
 
-fn handle_escapes(input: &str) -> Result<String, ()> {
-    let (rem, strings) = many0(alt((
-        parse_escaped_char,
-        map(take_until1_or_eof("\\"), Cow::Borrowed)
-    )))(input).map_err(|_| ())?;
-    if rem.len() > 0 {
-        return Err(());
-    }
-    let size = strings.iter().map(|v| v.len()).sum();
-    let mut ret = String::with_capacity(size);
-    for s in strings {
-        ret.push_str(&*s);
-    }
-    Ok(ret)
-}
-
-fn parse_escaped_char(inp: &str) -> IResult<&str, Cow<str>> {
-    let (input, _) = char('\\')(inp)?;
-    let (input, c) = anychar(input)?;
-
-    let escaped_c = match c {
-        '{' | '}' | ':' | ';' | '\\' | '>' => Cow::Owned(c.to_string()),
-        'n' => Cow::Owned(String::from("\n")),
-        _ => {
-            Cow::Borrowed(&inp[..c.len_utf8()+1])
+        let escaped_c;
+        if chars.contains(&c) {
+            escaped_c = Cow::Borrowed(&init_input[1 .. c.len_utf8()+1]);
+        } else if c == 'n' {
+            escaped_c = Cow::Owned(String::from("\n"));
+        } else {
+            escaped_c = Cow::Borrowed(&init_input[0 .. c.len_utf8()+1]);
         }
-    };
 
-    Ok((input, escaped_c))
+        Ok((input, escaped_c))
+    }
 }
 
-fn parse_string(check: impl Fn(char) -> bool) -> impl Fn(&str) -> IResult<&str, String> {
-    move |i| {
-        map(take_till1(|c| check(c)), String::from)(i)
+fn parse_string(chars: &[char]) -> impl Fn(&str) -> IResult<&str, String> + '_ {
+    move |input| {
+        let (input, strings) = many1(alt((
+            parse_escaped_char(chars),
+            map(
+                take_till1(|c: char| c == '\\' || chars.contains(&c)),
+                Cow::Borrowed
+            )
+        )))(input)?;
+
+        let size = strings.iter().map(|s| s.len()).sum();
+        let mut ret = String::with_capacity(size);
+        for s in strings {
+            ret.push_str(&*s);
+        }
+        Ok((input, ret))
     }
 }
 
@@ -189,7 +163,7 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
     move |i: &str| {
         fold_many0(
             alt((
-                map(parse_string(|c| chars.contains(&c)), |s| ASTVariants::ASTValue(AST::String(s))),
+                map(parse_string(chars), |s| ASTVariants::ASTValue(AST::String(s))),
                 map(parse_escaped_block, ASTVariants::ASTVec),
                 map(parse_block, ASTVariants::ASTValue)
             )),
@@ -202,7 +176,7 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
 fn parse_block_args(mut input: &str) -> IResult<&str, (Vec<Vec<AST>>, &str)> {
     let mut args = Vec::new();
     loop {
-        let (i, arg) = parse_block_arg(&['{',':',';','}'])(input)?;
+        let (i, arg) = parse_block_arg(&['{', ';', '}'])(input)?;
         let (i, sep) = alt((
             tag(";}"),
             tag(";"),
@@ -263,7 +237,7 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
     let (input, _) = tag("{>")(input)?;
     let (input, mut body) = fold_many0(
         alt((
-            map(parse_string(|c| c == '{' || c == '}'), |s| ASTVariants::ASTValue(AST::String(s))),
+            map(parse_string(&['{', '}']), |s| ASTVariants::ASTValue(AST::String(s))),
             map(parse_escaped_block, ASTVariants::ASTVec),
             map(parse_block, ASTVariants::ASTValue)
         )),
@@ -285,7 +259,7 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
 fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
     fold_many0(
         alt((
-            map(parse_string(|c| c == '{'), |s| ASTVariants::ASTValue(AST::String(s))),
+            map(parse_string(&['{']), |s| ASTVariants::ASTValue(AST::String(s))),
             map(parse_escaped_block, ASTVariants::ASTVec),
             map(parse_block, ASTVariants::ASTValue)
         )),
