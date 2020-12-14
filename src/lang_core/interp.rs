@@ -16,6 +16,7 @@ pub enum VarValues {
     Num(f64),
     Func(Vec<String>, Vec<Instruction>, Gc<Namespace>),
     RustFunc(fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>),
+    List(Vec<Gc<VarValues>>),
 }
 
 pub fn f64_to_string(n: f64) -> String {
@@ -41,6 +42,9 @@ impl ToString for VarValues {
             VarValues::Func(_, _, _) | VarValues::RustFunc(_) => {
                 String::from("<Function>")
             },
+            VarValues::List(_) => {
+                String::from("<List>")
+            }
         }
     }
 }
@@ -52,6 +56,7 @@ impl From<&VarValues> for bool {
             VarValues::Str(s) => !s.is_empty() && s != "0",
             VarValues::Num(v) => *v != 0.0,
             VarValues::Func(_, _, _) | VarValues::RustFunc(_) => true,
+            VarValues::List(vs) => !vs.is_empty()
         }
     }
 }
@@ -83,7 +88,12 @@ impl fmt::Debug for VarValues {
                 fmt.debug_tuple("RustFunc")
                     .field(&format_args!("_"))
                     .finish()
-            }
+            },
+            VarValues::List(vs) => {
+                fmt.debug_tuple("List")
+                    .field(vs)
+                    .finish()
+            },
         }
     }
 }
@@ -119,6 +129,37 @@ impl VarValues {
                     ))
                 ))
             },
+        }
+    }
+
+    fn get_index(&self, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
+        match self {
+            VarValues::List(vs) => {
+                match &*index.borrow() {
+                    VarValues::Str(s) => {
+                        let v = s.parse::<usize>().unwrap();
+                        Ok(Gc::clone(&vs[v]))
+                    },
+                    VarValues::Num(n) => {
+                        let v = *n as usize;
+                        Ok(Gc::clone(&vs[v]))
+                    },
+                    _ => {
+                        Err(LangError::Throw(
+                            Gc::new(RefCell::new(
+                                VarValues::Str(String::from("invalid index"))
+                            ))
+                        ))
+                    },
+                }
+            },
+            _ => {
+                Err(LangError::Throw(
+                    Gc::new(RefCell::new(
+                        VarValues::Str(String::from("cannot index"))
+                    ))
+                ))
+            }
         }
     }
 }
@@ -282,12 +323,14 @@ impl Context {
                     }
                 }
                 self.stack.push(var_value);
-            }
+            },
             Instruction::GETATTR => {
 
             },
             Instruction::GETINDEX => {
-
+                let index = self.stack.pop().unwrap();
+                let value = self.stack.pop().unwrap();
+                self.stack.push(value.borrow().get_index(index)?);
             },
             Instruction::DELVAR => {
 
@@ -314,6 +357,14 @@ impl Context {
                 let args = self.stack.split_off(self.stack.len() - arg_size);
                 let called_var = self.stack.pop().unwrap();
                 called_var.borrow().call(self, args)?;
+            },
+            Instruction::CREATELIST(n) => {
+                let vals = self.stack.split_off(self.stack.len() - n);
+                self.stack.push(
+                    Gc::new(RefCell::new(
+                        VarValues::List(vals)
+                    ))
+                );
             },
             Instruction::STARTCATCH(loc) => {
                 let stack_size = self.stack.len();

@@ -9,6 +9,7 @@ pub enum Instruction {
     CONCAT(usize),
     CREATEFUNC(Vec<String>, usize, usize),
     CALLFUNC(usize),
+    CREATELIST(usize),
     GETVAR,
     GETINDEX,
     GETATTR,
@@ -110,6 +111,13 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                         // last arg is the function body
                         *stackvals += 1;
                         ast_compile_function(prog, funcs, args);
+                    },
+                    "list" => {
+                        for v in args {
+                            ast_vec_bytecode(prog, funcs, v);
+                        }
+                        prog.push(Instruction::CREATELIST(args.len()));
+                        *stackvals += 1;
                     },
                     "nonlocal" => {
                         // TODO: compile this only inside function bodies
