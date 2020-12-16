@@ -217,31 +217,7 @@ fn parse_var_access(input: &str) -> IResult<&str, VarAccess> {
 
     let (input, accessors) = many0(alt((parse_index, parse_attr, parse_call)))(input)?;
 
-    return Ok((input, VarAccess {value, accessors}));
-    /*
-    match end {
-        Some(":") | Some(";") | Some("}") => {
-            // no accessors
-            Ok((input, VarAccess {value, accessors: Vec::new()}))
-        },
-        Some(".") | Some("[") => {
-            let (input, accessors) = many0(alt((
-                map(
-                    preceded(tag("."), parse_block_arg(&['{', '.', '['])),
-                    |v| (AccessorType::Attr, v)
-                ),
-                map(
-                    delimited(tag("["), parse_block_arg(&['{', ']']), tag("]")),
-                    |v| (AccessorType::Index, v)
-                )
-            )))(input)?;
-            Ok((input, VarAccess {value, accessors}))
-        },
-        _ => {
-            panic!("invalid character in var accessor");
-        }
-    }
-    */
+    Ok((input, VarAccess {value, accessors}))
 }
 
 fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> + '_ {
@@ -260,34 +236,6 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
         )(i)
     }
 }
-
-/*
-fn parse_block_args(mut input: &str) -> IResult<&str, (Vec<Vec<AST>>, &str)> {
-    let mut args = Vec::new();
-    loop {
-        let (i, arg) = parse_block_arg(&['{', ';', '}'])(input)?;
-        let (i, sep) = alt((
-            tag(";}"),
-            tag(";"),
-            tag("}")
-        ))(i)?;
-        args.push(arg);
-        match sep {
-            ";" => {
-                input = i;
-                continue;
-            }
-            ";}" => {
-                return Ok((i, (args, ";}")));
-            }
-            "}" => {
-                return Ok((i, (args, "}")));
-            }
-            _ => unreachable!()
-        }
-    }
-}
-*/
 
 fn parse_set_block(input: &str) -> IResult<&str, AST> {
     let (input, _) = tag("{set:")(input)?;
@@ -370,28 +318,6 @@ fn parse_func_block(input: &str) -> IResult<&str, AST> {
             }
         )]
     )))
-    /*
-    let (input, access) = parse_var_access(input)?;
-    let (input, _) = tag(";")(input)?;
-    let (input, (args, s)) = parse_block_args(input)?;
-    match s {
-        ";}" => {
-            Ok((input, AST::SetVar(access, vec![
-                AST::Function(
-                    VarAccess {
-                        value: vec![AST::String(String::from("lambda"))],
-                        accessors: vec![]
-                    },
-                    args
-                )
-            ])))
-        },
-        "}" => {
-            panic!("uh")
-        }
-        _ => unreachable!(),
-    }
-    */
 }
 
 fn parse_block(input: &str) -> IResult<&str, AST> {
@@ -404,27 +330,6 @@ fn parse_block(input: &str) -> IResult<&str, AST> {
     let (input, _) = char('}')(input)?;
 
     Ok((input, AST::Variable(var)))
-    /*
-    let (input, sep) = match_strings!(":", ";}", "}", ";")(input)?;
-
-    match sep {
-        ":" => {
-            let (input, (args, end)) = parse_block_args(input)?;
-            match end {
-                ";}" => Ok((input, AST::Function(var, args))),
-                "}"  => Ok((input, AST::Variable(var, args))),
-                _    => unreachable!()
-            }
-        },
-        ";}" => Ok((input, AST::Function(var, Vec::new()))),
-        "}"  => Ok((input, AST::Variable(var, Vec::new()))),
-        ";" => {
-            let (input, _) = parse_block_args(input)?;
-            Ok((input, AST::String(String::from("<error:missing semicolon>"))))
-        },
-        _ => unreachable!()
-    }
-    */
 }
 
 fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
