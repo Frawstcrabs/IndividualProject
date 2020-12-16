@@ -105,14 +105,37 @@ impl fmt::Debug for VarValues {
     }
 }
 
+#[macro_export]
+macro_rules! throw_string {
+    ($($args:expr),+) => {
+        Err(LangError::Throw(
+            Gc::new(RefCell::new(
+                VarValues::Str(format!($($args),+))
+            ))
+        ))
+    };
+}
+
 impl VarValues {
     fn call(&self, ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<()> {
         match self {
             VarValues::Func(names, inst, outer_scope) => {
                 let mut vars = HashMap::with_capacity(args.len());
-                assert!(names.len() <= args.len());
+                if names.len() > args.len() {
+                    return throw_string!("expected {} args, got {}", names.len(), args.len());
+                }
                 for i in 0..names.len() {
                     vars.insert(names[i].clone(), VarRefType::Value(Gc::clone(&args[i])));
+                }
+                if names.iter().all(|v| v != "args") {
+                    vars.insert(
+                        String::from("args"),
+                        VarRefType::Value(
+                            Gc::new(RefCell::new(
+                                VarValues::List(args)
+                            ))
+                        )
+                    );
                 }
                 let old_scope = Gc::clone(&ctx.cur_scope);
                 let new_ns = Gc::new(RefCell::new(Namespace {
@@ -135,11 +158,7 @@ impl VarValues {
                 Ok(())
             },
             _ => {
-                Err(LangError::Throw(
-                    Gc::new(RefCell::new(
-                        VarValues::Str(String::from("uncallable object"))
-                    ))
-                ))
+                throw_string!("uncallable object")
             },
         }
     }
@@ -165,20 +184,12 @@ impl VarValues {
                         )
                     },
                     _ => {
-                        Err(LangError::Throw(
-                            Gc::new(RefCell::new(
-                                VarValues::Str(String::from("invalid attr"))
-                            ))
-                        ))
+                        throw_string!("invalid attr")
                     }
                 }
             },
             _ => {
-                Err(LangError::Throw(
-                    Gc::new(RefCell::new(
-                        VarValues::Str(String::from("cannot get attr"))
-                    ))
-                ))
+                throw_string!("cannot get attr")
             },
         }
     }
@@ -190,11 +201,7 @@ impl VarValues {
                     VarValues::Str(s) => {
                         let v = s.parse::<isize>().unwrap();
                         if v < 0 || v as usize >= vs.len() {
-                            return Err(LangError::Throw(
-                                Gc::new(RefCell::new(
-                                    VarValues::Str(String::from("index out of range"))
-                                ))
-                            ));
+                            return throw_string!("index out of range");
                         }
                         Ok(Gc::clone(&vs[v as usize]))
                     },
@@ -203,38 +210,22 @@ impl VarValues {
                         Ok(Gc::clone(&vs[v]))
                     },
                     _ => {
-                        Err(LangError::Throw(
-                            Gc::new(RefCell::new(
-                                VarValues::Str(String::from("invalid index"))
-                            ))
-                        ))
+                        throw_string!("invalid index")
                     },
                 }
             },
             _ => {
-                Err(LangError::Throw(
-                    Gc::new(RefCell::new(
-                        VarValues::Str(String::from("cannot index"))
-                    ))
-                ))
+                throw_string!("cannot index")
             }
         }
     }
 
     fn set_index(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
-        Err(LangError::Throw(
-            Gc::new(RefCell::new(
-                VarValues::Str(String::from("cannot set index"))
-            ))
-        ))
+        throw_string!("cannot set index")
     }
 
     fn set_attr(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
-        Err(LangError::Throw(
-            Gc::new(RefCell::new(
-                VarValues::Str(String::from("cannot set attr"))
-            ))
-        ))
+        throw_string!("cannot set attr")
     }
 }
 

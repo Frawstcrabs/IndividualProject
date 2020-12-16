@@ -1,13 +1,17 @@
-use crate::lang_core::interp::{LangResult, LangError, VarValues, Context, Gc, f64_to_string};
+use crate::throw_string;
+use crate::lang_core::interp::{
+    LangResult,
+    LangError,
+    VarValues,
+    Context,
+    Gc,
+    f64_to_string,
+};
 use std::cell::RefCell;
 
 pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
     if args.len() < 2 {
-        return Err(LangError::Throw(
-            Gc::new(RefCell::new(
-                VarValues::Str(format!("<eq:expected 2 args, got {}>", args.len()))
-            ))
-        ));
+        return throw_string!("<eq:expected 2 args, got {}>", args.len());
     }
 
     let mut item1 = &args[0];
