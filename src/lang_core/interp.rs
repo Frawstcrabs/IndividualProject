@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::hint::unreachable_unchecked;
 
 pub enum LangError {
     Throw(Gc<VarValues>),
@@ -16,6 +17,7 @@ pub enum VarValues {
     Num(f64),
     Func(Vec<String>, Vec<Instruction>, Gc<Namespace>),
     RustFunc(fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>),
+    RustClosure(Box<dyn Fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>>),
     List(Vec<Gc<VarValues>>),
 }
 
@@ -39,7 +41,7 @@ impl ToString for VarValues {
             VarValues::Num(v) => {
                 f64_to_string(*v)
             },
-            VarValues::Func(_, _, _) | VarValues::RustFunc(_) => {
+            VarValues::Func(_, _, _) | VarValues::RustFunc(_) | VarValues::RustClosure(_) => {
                 String::from("<Function>")
             },
             VarValues::List(_) => {
@@ -55,7 +57,7 @@ impl From<&VarValues> for bool {
             VarValues::Nil => false,
             VarValues::Str(s) => !s.is_empty() && s != "0",
             VarValues::Num(v) => *v != 0.0,
-            VarValues::Func(_, _, _) | VarValues::RustFunc(_) => true,
+            VarValues::Func(_, _, _) | VarValues::RustFunc(_) | VarValues::RustClosure(_) => true,
             VarValues::List(vs) => !vs.is_empty()
         }
     }
@@ -86,6 +88,11 @@ impl fmt::Debug for VarValues {
             },
             VarValues::RustFunc(_) => {
                 fmt.debug_tuple("RustFunc")
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            VarValues::RustClosure(_) => {
+                fmt.debug_tuple("RustClosure")
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -121,7 +128,12 @@ impl VarValues {
                 let ret_val = f(ctx, args)?;
                 ctx.stack.push(ret_val);
                 Ok(())
-            }
+            },
+            VarValues::RustClosure(f) => {
+                let ret_val = f(ctx, args)?;
+                ctx.stack.push(ret_val);
+                Ok(())
+            },
             _ => {
                 Err(LangError::Throw(
                     Gc::new(RefCell::new(
@@ -132,19 +144,59 @@ impl VarValues {
         }
     }
     fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
-        Err(LangError::Throw(
-            Gc::new(RefCell::new(
-                VarValues::Str(String::from("cannot get attr"))
-            ))
-        ))
+        match self {
+            VarValues::List(_) => {
+                let name = index.borrow().to_string();
+                match &name[..] {
+                    "push" => {
+                        let method = move |_ctx: &mut Context, args: Vec<Gc<VarValues>>| {
+                            match &mut *obj.borrow_mut() {
+                                VarValues::List(vals) => {
+                                    vals.extend(args);
+                                    Ok(Gc::new(RefCell::new(VarValues::Nil)))
+                                }
+                                _ => unreachable!()
+                            }
+                        };
+                        Ok(
+                            Gc::new(RefCell::new(
+                                VarValues::RustClosure(Box::new(method))
+                            ))
+                        )
+                    },
+                    _ => {
+                        Err(LangError::Throw(
+                            Gc::new(RefCell::new(
+                                VarValues::Str(String::from("invalid attr"))
+                            ))
+                        ))
+                    }
+                }
+            },
+            _ => {
+                Err(LangError::Throw(
+                    Gc::new(RefCell::new(
+                        VarValues::Str(String::from("cannot get attr"))
+                    ))
+                ))
+            },
+        }
     }
+
     fn get_index(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
                 match &*index.borrow() {
                     VarValues::Str(s) => {
-                        let v = s.parse::<usize>().unwrap();
-                        Ok(Gc::clone(&vs[v]))
+                        let v = s.parse::<isize>().unwrap();
+                        if v < 0 || v as usize >= vs.len() {
+                            return Err(LangError::Throw(
+                                Gc::new(RefCell::new(
+                                    VarValues::Str(String::from("index out of range"))
+                                ))
+                            ));
+                        }
+                        Ok(Gc::clone(&vs[v as usize]))
                     },
                     VarValues::Num(n) => {
                         let v = *n as usize;
