@@ -162,8 +162,8 @@ fn add_block_arg(mut vec: Vec<AST>, r: ASTVariants) -> Vec<AST> {
         ASTVariants::ASTValue(ast) => {
             try_join_strings(ast, &mut vec);
         }
-        ASTVariants::ASTVec(ast) => {
-            let mut iter = ast.into_iter();
+        ASTVariants::ASTVec(asts) => {
+            let mut iter = asts.into_iter();
             if let Some(ast) = iter.next() {
                 try_join_strings(ast, &mut vec);
             }
@@ -182,32 +182,41 @@ macro_rules! match_strings {
 }
 
 fn parse_var_access(input: &str) -> IResult<&str, VarAccess> {
+    // first thing in a var is either a string (identifier), or another expression
+    // allows for {a.b} or {{a}.b}
+    // {a} and {{a}} are equivalent
     let (input, value) = parse_block_arg(&['.', '[', ':', ';', '{', '}'])(input)?;
 
     fn parse_index(input: &str) -> IResult<&str, Accessor> {
+        // look for a[{b}], retrieve the {b}
         map(
             delimited(tag("["), parse_block_arg(&['{', ']']), tag("]")),
             |v| Accessor::Index(v)
         )(input)
     }
     fn parse_attr(input: &str) -> IResult<&str, Accessor> {
+        // look for a.{b}, retrieve the {b}
         map(
-            preceded(tag("."), parse_block_arg(&['{', '.', '[', ':', ';'])),
+            preceded(tag("."), parse_block_arg(&['{', '}', '.', '[', ':', ';'])),
             |v| Accessor::Attr(v)
         )(input)
     }
     fn parse_call(mut input: &str) -> IResult<&str, Accessor> {
+        // look for a:b:c:d;, retrieve the [b, c, d]
+        // a; would retrieve []
         let mut args = Vec::new();
         loop {
             let (i, sep) = match_strings!(":", ";")(input)?;
             match sep {
                 ":" => {
+                    // new arg found
                     let (i, arg) = parse_block_arg(&['{', ':', ';'])(i)?;
                     args.push(arg);
                     input = i;
                     continue;
                 },
                 ";" => {
+                    // end of function call
                     return Ok((i, Accessor::Call(args)));
                 },
                 _ => unreachable!()
@@ -215,7 +224,14 @@ fn parse_var_access(input: &str) -> IResult<&str, VarAccess> {
         }
     }
 
-    let (input, accessors) = many0(alt((parse_index, parse_attr, parse_call)))(input)?;
+    // var accesses are some list of these types
+    let (input, accessors) = many0(
+        alt((
+            parse_index,
+            parse_attr,
+            parse_call
+        ))
+    )(input)?;
 
     Ok((input, VarAccess {value, accessors}))
 }
