@@ -1,4 +1,4 @@
-use crate::lang_core::parse::{AST, VarAccess, AccessorType};
+use crate::lang_core::parse::{AST, VarAccess, Accessor};
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
@@ -26,6 +26,25 @@ pub enum Instruction {
     END,
 }
 
+fn ast_accessor_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, accessor: &Accessor) {
+    match accessor {
+        Accessor::Index(arg) => {
+            ast_vec_bytecode(prog, funcs, arg);
+            prog.push(Instruction::GETINDEX);
+        },
+        Accessor::Attr(arg) => {
+            ast_vec_bytecode(prog, funcs, arg);
+            prog.push(Instruction::GETATTR);
+        },
+        Accessor::Call(args) => {
+            for arg in args {
+                ast_vec_bytecode(prog, funcs, arg);
+            }
+            prog.push(Instruction::CALLFUNC(args.len()));
+        },
+    }
+}
+
 fn ast_var_access(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, var: &VarAccess) {
     match &var.value[..] {
         [AST::String(s)] => {
@@ -36,16 +55,8 @@ fn ast_var_access(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instr
             ast_vec_bytecode(prog, funcs, &var.value);
         },
     }
-    for (t, name) in &var.accessors {
-        ast_vec_bytecode(prog, funcs, name);
-        match t {
-            AccessorType::Index => {
-                prog.push(Instruction::GETINDEX);
-            },
-            AccessorType::Attr => {
-                prog.push(Instruction::GETATTR);
-            },
-        }
+    for accessor in &var.accessors {
+        ast_accessor_bytecode(prog, funcs, accessor);
     }
 }
 
@@ -55,9 +66,9 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
             prog.push(Instruction::PUSHSTR(s.to_owned()));
             *stackvals += 1;
         },
-        AST::Function(var, args) => {
+        AST::Variable(var) => {
             match (&var.value[..], &var.accessors[..]) {
-                ([AST::String(s)], []) => match &s[..] {
+                ([AST::String(s)], [Accessor::Call(args)]) => match &s[..] {
                     "if" => {
                         assert!(args.len() >= 2);
                         *stackvals += 1;
@@ -145,14 +156,14 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                         }
                     },
                     _ => {
+                        ast_var_access(prog, funcs, var);
                         *stackvals += 1;
-                        ast_function_call(prog, funcs, var, args);
                     },
                 },
                 _ => {
+                    ast_var_access(prog, funcs, var);
                     *stackvals += 1;
-                    ast_function_call(prog, funcs, var, args);
-                },
+                }
             }
         },
         AST::SetVar(var, val) => {
@@ -165,26 +176,23 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                 ([AST::String(s)], _) => {
                     prog.push(Instruction::PUSHSTR(s.to_owned()));
                     prog.push(Instruction::GETVAR);
-                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
-                        ast_vec_bytecode(prog, funcs, name);
-                        match t {
-                            AccessorType::Index => {
-                                prog.push(Instruction::GETINDEX);
-                            },
-                            AccessorType::Attr => {
-                                prog.push(Instruction::GETATTR);
-                            },
-                        }
+                    for accessor in &var.accessors[..var.accessors.len()-1] {
+                        ast_accessor_bytecode(prog, funcs, accessor);
                     }
-                    let (t, name) = var.accessors.last().unwrap();
-                    ast_vec_bytecode(prog, funcs, name);
-                    ast_vec_bytecode(prog, funcs, val);
-                    match t {
-                        AccessorType::Index => {
+                    let accessor = var.accessors.last().unwrap();
+                    match accessor {
+                        Accessor::Index(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
+                            ast_vec_bytecode(prog, funcs, val);
                             prog.push(Instruction::SETINDEX);
                         },
-                        AccessorType::Attr => {
+                        Accessor::Attr(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
+                            ast_vec_bytecode(prog, funcs, val);
                             prog.push(Instruction::SETATTR);
+                        },
+                        Accessor::Call(_) => {
+                            panic!("cannot set to function call");
                         },
                     }
                 },
@@ -195,26 +203,23 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                 }
                 _ => {
                     ast_vec_bytecode(prog, funcs, &var.value);
-                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
-                        ast_vec_bytecode(prog, funcs, name);
-                        match t {
-                            AccessorType::Index => {
-                                prog.push(Instruction::GETINDEX);
-                            },
-                            AccessorType::Attr => {
-                                prog.push(Instruction::GETATTR);
-                            },
-                        }
+                    for accessor in &var.accessors[..var.accessors.len()-1] {
+                        ast_accessor_bytecode(prog, funcs, accessor);
                     }
-                    let (t, name) = var.accessors.last().unwrap();
-                    ast_vec_bytecode(prog, funcs, name);
-                    ast_vec_bytecode(prog, funcs, val);
-                    match t {
-                        AccessorType::Index => {
+                    let accessor = var.accessors.last().unwrap();
+                    match accessor {
+                        Accessor::Index(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
+                            ast_vec_bytecode(prog, funcs, val);
                             prog.push(Instruction::SETINDEX);
                         },
-                        AccessorType::Attr => {
+                        Accessor::Attr(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
+                            ast_vec_bytecode(prog, funcs, val);
                             prog.push(Instruction::SETATTR);
+                        },
+                        Accessor::Call(_) => {
+                            panic!("cannot set to function call");
                         },
                     }
                 },
@@ -229,25 +234,21 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                 ([AST::String(s)], _) => {
                     prog.push(Instruction::PUSHSTR(s.to_owned()));
                     prog.push(Instruction::GETVAR);
-                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
-                        ast_vec_bytecode(prog, funcs, name);
-                        match t {
-                            AccessorType::Index => {
-                                prog.push(Instruction::GETINDEX);
-                            },
-                            AccessorType::Attr => {
-                                prog.push(Instruction::GETATTR);
-                            },
-                        }
+                    for accessor in &var.accessors[..var.accessors.len()-1] {
+                        ast_accessor_bytecode(prog, funcs, accessor);
                     }
-                    let (t, name) = var.accessors.last().unwrap();
-                    ast_vec_bytecode(prog, funcs, name);
-                    match t {
-                        AccessorType::Index => {
+                    let accessor = var.accessors.last().unwrap();
+                    match accessor {
+                        Accessor::Index(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
                             prog.push(Instruction::DELINDEX);
                         },
-                        AccessorType::Attr => {
+                        Accessor::Attr(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
                             prog.push(Instruction::DELATTR);
+                        },
+                        Accessor::Call(_) => {
+                            panic!("cannot del function call");
                         },
                     }
                 },
@@ -256,33 +257,25 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                 }
                 _ => {
                     ast_vec_bytecode(prog, funcs, &var.value);
-                    for (t, name) in &var.accessors[..var.accessors.len()-1] {
-                        ast_vec_bytecode(prog, funcs, name);
-                        match t {
-                            AccessorType::Index => {
-                                prog.push(Instruction::GETINDEX);
-                            },
-                            AccessorType::Attr => {
-                                prog.push(Instruction::GETATTR);
-                            },
-                        }
+                    for accessor in &var.accessors[..var.accessors.len()-1] {
+                        ast_accessor_bytecode(prog, funcs, accessor);
                     }
-                    let (t, name) = var.accessors.last().unwrap();
-                    ast_vec_bytecode(prog, funcs, name);
-                    match t {
-                        AccessorType::Index => {
+                    let accessor = var.accessors.last().unwrap();
+                    match accessor {
+                        Accessor::Index(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
                             prog.push(Instruction::DELINDEX);
                         },
-                        AccessorType::Attr => {
+                        Accessor::Attr(arg) => {
+                            ast_vec_bytecode(prog, funcs, arg);
                             prog.push(Instruction::DELATTR);
+                        },
+                        Accessor::Call(_) => {
+                            panic!("cannot del function call");
                         },
                     }
                 },
             }
-        },
-        AST::Variable(var, _args) => {
-            ast_var_access(prog, funcs, var);
-            *stackvals += 1;
         },
     }
 }
@@ -321,19 +314,6 @@ fn ast_link_functions(prog: &mut Vec<Instruction>, funcs: Vec<(usize, Vec<Instru
         }
         prog.extend(inst);
     }
-}
-
-fn ast_function_call(
-    prog: &mut Vec<Instruction>,
-    funcs: &mut Vec<(usize, Vec<Instruction>)>,
-    var: &VarAccess,
-    args: &[Vec<AST>])
-{
-    ast_var_access(prog, funcs, var);
-    for ast in args {
-        ast_vec_bytecode(prog, funcs, ast);
-    }
-    prog.push(Instruction::CALLFUNC(args.len()));
 }
 
 fn ast_vec_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, astlist: &[AST]) {

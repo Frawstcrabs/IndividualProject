@@ -131,8 +131,14 @@ impl VarValues {
             },
         }
     }
-
-    fn get_index(&self, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
+    fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
+        Err(LangError::Throw(
+            Gc::new(RefCell::new(
+                VarValues::Str(String::from("cannot get attr"))
+            ))
+        ))
+    }
+    fn get_index(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
                 match &*index.borrow() {
@@ -161,6 +167,22 @@ impl VarValues {
                 ))
             }
         }
+    }
+
+    fn set_index(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
+        Err(LangError::Throw(
+            Gc::new(RefCell::new(
+                VarValues::Str(String::from("cannot set index"))
+            ))
+        ))
+    }
+
+    fn set_attr(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
+        Err(LangError::Throw(
+            Gc::new(RefCell::new(
+                VarValues::Str(String::from("cannot set attr"))
+            ))
+        ))
     }
 }
 
@@ -290,10 +312,18 @@ impl Context {
                 }
             },
             Instruction::SETATTR => {
-
+                let val = self.stack.pop().unwrap();
+                let index = self.stack.pop().unwrap();
+                let obj = self.stack.pop().unwrap();
+                let obj_clone = Gc::clone(&obj);
+                obj.borrow_mut().set_attr(obj_clone, index, val)?;
             },
             Instruction::SETINDEX => {
-
+                let val = self.stack.pop().unwrap();
+                let index = self.stack.pop().unwrap();
+                let obj = self.stack.pop().unwrap();
+                let obj_clone = Gc::clone(&obj);
+                obj.borrow_mut().set_index(obj_clone, index, val)?;
             },
             Instruction::SETNONLOCAL => {
                 let name = self.stack.pop().unwrap().borrow().to_string();
@@ -325,12 +355,16 @@ impl Context {
                 self.stack.push(var_value);
             },
             Instruction::GETATTR => {
-
+                let index = self.stack.pop().unwrap();
+                let obj = self.stack.pop().unwrap();
+                let obj_clone = Gc::clone(&obj);
+                self.stack.push(obj.borrow().get_attr(obj_clone, index)?);
             },
             Instruction::GETINDEX => {
                 let index = self.stack.pop().unwrap();
-                let value = self.stack.pop().unwrap();
-                self.stack.push(value.borrow().get_index(index)?);
+                let obj = self.stack.pop().unwrap();
+                let obj_clone = Gc::clone(&obj);
+                self.stack.push(obj.borrow().get_index(obj_clone, index)?);
             },
             Instruction::DELVAR => {
 

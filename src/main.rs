@@ -7,11 +7,13 @@ fn main() {
     let input = "
     {!>oneline}
 
-    {set:a;{list:1;2;3;};}
+    {set:a:{list:1:2:3;};}
 
-    {func:hmm;i;{a[{i}]};}
+    {func:{hmm:items:i;}:
+        {items[{i}]}
+    ;}
 
-    {a[0]} {hmm:2;} {a[1]}";
+    {a[0]} {hmm:{a}:2;} {a[1]}";
     println!("{:?}", input);
     let ast = match parse::run_parser(input) {
         Ok(v) => v,
@@ -21,11 +23,11 @@ fn main() {
         }
     };
     //println!("ast: {:?}", ast);
-    let mut ctx = interp::Context::new();
     let program = bytecode::generate_bytecode(&ast);
     for (inst, i) in program.iter().zip(0..) {
         println!("{:<2} - {:?}", i, inst);
     }
+    let mut ctx = interp::Context::new();
     let ret = ctx.interpret(&program);
     println!("stack: {:?}", ctx.stack);
     match ret {
