@@ -3,6 +3,7 @@ use crate::lang_core::parse::{AST, VarAccess, Accessor};
 #[derive(Debug, Clone)]
 pub enum Instruction {
     PUSHSTR(String),
+    PUSHASTSTR(String, Option<f64>),
     PUSHNIL,
     IFFALSE(usize),
     GOTO(usize),
@@ -47,8 +48,8 @@ fn ast_accessor_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Ve
 
 fn ast_var_access(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, var: &VarAccess) {
     match &var.value[..] {
-        [AST::String(s)] => {
-            prog.push(Instruction::PUSHSTR(s.to_owned()));
+        [AST::String(s, v)] => {
+            prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
             prog.push(Instruction::GETVAR);
         },
         _ => {
@@ -62,13 +63,13 @@ fn ast_var_access(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instr
 
 fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruction>)>, ast: &AST, stackvals: &mut usize) {
     match ast {
-        AST::String(s) => {
-            prog.push(Instruction::PUSHSTR(s.to_owned()));
+        AST::String(s, v) => {
+            prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
             *stackvals += 1;
         },
         AST::Variable(var) => {
             match (&var.value[..], &var.accessors[..]) {
-                ([AST::String(s)], [Accessor::Call(args)]) => match &s[..] {
+                ([AST::String(s, _)], [Accessor::Call(args)]) => match &s[..] {
                     "if" => {
                         assert!(args.len() >= 2);
                         *stackvals += 1;
@@ -168,13 +169,13 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
         },
         AST::SetVar(var, val) => {
             match (&var.value[..], &var.accessors[..]) {
-                ([AST::String(s)], []) => {
-                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                ([AST::String(s, v)], []) => {
+                    prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
                     ast_vec_bytecode(prog, funcs, val);
                     prog.push(Instruction::SETVAR);
                 },
-                ([AST::String(s)], _) => {
-                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                ([AST::String(s, v)], _) => {
+                    prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
                     prog.push(Instruction::GETVAR);
                     for accessor in &var.accessors[..var.accessors.len()-1] {
                         ast_accessor_bytecode(prog, funcs, accessor);
@@ -227,12 +228,12 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
         },
         AST::DelVar(var) => {
             match (&var.value[..], &var.accessors[..]) {
-                ([AST::String(s)], []) => {
-                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                ([AST::String(s, v)], []) => {
+                    prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
                     prog.push(Instruction::DELVAR);
                 },
-                ([AST::String(s)], _) => {
-                    prog.push(Instruction::PUSHSTR(s.to_owned()));
+                ([AST::String(s, v)], _) => {
+                    prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
                     prog.push(Instruction::GETVAR);
                     for accessor in &var.accessors[..var.accessors.len()-1] {
                         ast_accessor_bytecode(prog, funcs, accessor);
@@ -284,7 +285,7 @@ fn ast_compile_function(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec
     let mut arg_names = Vec::with_capacity(args.len() - 1);
     for arg in &args[..args.len() - 1] {
         match &arg[..] {
-            [AST::String(s)] => {
+            [AST::String(s, _)] => {
                 arg_names.push(s.to_owned());
             },
             _ => {

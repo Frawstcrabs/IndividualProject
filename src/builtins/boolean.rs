@@ -16,22 +16,31 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
 
     let mut item1 = &args[0];
     for item2 in &args[1..] {
+        use VarValues::*;
         let comp = match (&*item1.borrow(), &*item2.borrow()) {
-            (VarValues::Nil, VarValues::Nil) => {
+            (Nil, Nil) => {
                 true
             },
-            (VarValues::Nil, VarValues::Str(s)) |
-            (VarValues::Str(s), VarValues::Nil) => {
+            (Nil, Str(s)) |
+            (Str(s), Nil) |
+            (Nil, AstStr(s, _)) |
+            (AstStr(s, _), Nil) => {
                 s.is_empty()
             },
-            (VarValues::Str(s1), VarValues::Str(s2)) => {
+            (Str(s1), Str(s2)) |
+            (AstStr(s1, _), Str(s2)) |
+            (Str(s1), AstStr(s2, _)) |
+            (AstStr(s1, None), AstStr(s2, None)) => {
                 s1 == s2
             },
-            (VarValues::Num(n1), VarValues::Num(n2)) => {
+            (Num(n1), Num(n2)) |
+            (AstStr(_, Some(n1)), Num(n2)) |
+            (Num(n1), AstStr(_, Some(n2))) |
+            (AstStr(_, Some(n1)), AstStr(_, Some(n2))) => {
                 n1 == n2
             },
-            (VarValues::Num(n), VarValues::Str(s)) |
-            (VarValues::Str(s), VarValues::Num(n)) => {
+            (Str(s), Num(n)) |
+            (Num(n), Str(s)) => {
                 s == &f64_to_string(*n)
             },
             (_, _) => {
@@ -39,7 +48,7 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
             },
         };
         if !comp {
-            return Ok(Gc::new(RefCell::new(VarValues::Num(0.0))));
+            return Ok(Gc::new(RefCell::new(Num(0.0))));
         }
         item1 = item2;
     }

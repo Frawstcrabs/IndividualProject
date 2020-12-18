@@ -4,7 +4,6 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
-use std::hint::unreachable_unchecked;
 
 pub enum LangError {
     Throw(Gc<VarValues>),
@@ -15,6 +14,7 @@ pub enum VarValues {
     Nil,
     Str(String),
     Num(f64),
+    AstStr(String, Option<f64>),
     Func(Vec<String>, Vec<Instruction>, Gc<Namespace>),
     RustFunc(fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>),
     RustClosure(Box<dyn Fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>>),
@@ -29,6 +29,16 @@ pub fn f64_to_string(n: f64) -> String {
     ret
 }
 
+pub fn string_to_f64(s: &str) -> Option<f64> {
+    if s.starts_with("0b") {
+        u64::from_str_radix(s, 2).map(|v| v as f64).ok()
+    } else if s.starts_with("0x") {
+        u64::from_str_radix(s, 16).map(|v| v as f64).ok()
+    } else {
+        s.parse::<f64>().ok()
+    }
+}
+
 impl ToString for VarValues {
     fn to_string(&self) -> String {
         match self {
@@ -40,6 +50,9 @@ impl ToString for VarValues {
             },
             VarValues::Num(v) => {
                 f64_to_string(*v)
+            },
+            VarValues::AstStr(s, _) => {
+                s.clone()
             },
             VarValues::Func(_, _, _) | VarValues::RustFunc(_) | VarValues::RustClosure(_) => {
                 String::from("<Function>")
@@ -54,11 +67,25 @@ impl ToString for VarValues {
 impl From<&VarValues> for bool {
     fn from(v: &VarValues) -> Self {
         match v {
-            VarValues::Nil => false,
-            VarValues::Str(s) => !s.is_empty() && s != "0",
-            VarValues::Num(v) => *v != 0.0,
-            VarValues::Func(_, _, _) | VarValues::RustFunc(_) | VarValues::RustClosure(_) => true,
-            VarValues::List(vs) => !vs.is_empty()
+            VarValues::Nil => {
+                false
+            },
+            VarValues::Str(s) |
+            VarValues::AstStr(s, None) => {
+                !s.is_empty() && s != "0"
+            },
+            VarValues::Num(v) |
+            VarValues::AstStr(_, Some(v)) => {
+                *v != 0.0
+            },
+            VarValues::Func(_, _, _) |
+            VarValues::RustFunc(_) |
+            VarValues::RustClosure(_) => {
+                true
+            },
+            VarValues::List(vs) => {
+                !vs.is_empty()
+            },
         }
     }
 }
@@ -77,6 +104,12 @@ impl fmt::Debug for VarValues {
             VarValues::Num(n) => {
                 fmt.debug_tuple("Num")
                     .field(n)
+                    .finish()
+            },
+            VarValues::AstStr(s, v) => {
+                fmt.debug_tuple("AstStr")
+                    .field(s)
+                    .field(v)
                     .finish()
             },
             VarValues::Func(names, inst, _) => {
@@ -198,14 +231,16 @@ impl VarValues {
         match self {
             VarValues::List(vs) => {
                 match &*index.borrow() {
-                    VarValues::Str(s) => {
+                    VarValues::Str(s) |
+                    VarValues::AstStr(s, None) => {
                         let v = s.parse::<isize>().unwrap();
                         if v < 0 || v as usize >= vs.len() {
                             return throw_string!("index out of range");
                         }
                         Ok(Gc::clone(&vs[v as usize]))
                     },
-                    VarValues::Num(n) => {
+                    VarValues::Num(n) |
+                    VarValues::AstStr(_, Some(n))=> {
                         let v = *n as usize;
                         Ok(Gc::clone(&vs[v]))
                     },
@@ -275,7 +310,18 @@ impl Context {
     fn interpret_inst(&mut self, prog: &[Instruction], counter: &mut usize) -> LangResult<()> {
         match &prog[*counter] {
             Instruction::PUSHSTR(s) => {
-                self.stack.push(Gc::new(RefCell::new(VarValues::Str(s.to_owned()))));
+                self.stack.push(
+                    Gc::new(RefCell::new(
+                        VarValues::Str(s.clone())
+                    ))
+                );
+            },
+            Instruction::PUSHASTSTR(s, v) => {
+                self.stack.push(
+                    Gc::new(RefCell::new(
+                        VarValues::AstStr(s.clone(), *v)
+                    ))
+                );
             },
             Instruction::PUSHNIL => {
                 self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));

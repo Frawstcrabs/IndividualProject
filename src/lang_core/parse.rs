@@ -4,16 +4,18 @@ use nom::{
     error::ParseError,
     multi::{many0, many1, fold_many0, separated_list},
     bytes::complete::{tag, take_until, take_till1},
-    combinator::{not, map, opt, peek},
+    combinator::{not, map, opt},
     character::complete::{char, anychar, multispace0, line_ending},
     branch::alt,
     sequence::{pair, delimited, preceded},
 };
 use std::borrow::Cow;
 
+use crate::interp::string_to_f64;
+
 #[derive(Clone, Debug)]
 pub enum AST {
-    String(String),
+    String(String, Option<f64>),
     Variable(VarAccess),
     SetVar(VarAccess, Vec<AST>),
     DelVar(VarAccess),
@@ -152,8 +154,9 @@ fn parse_string(chars: &[char]) -> impl Fn(&str) -> IResult<&str, String> + '_ {
 fn add_block_arg(mut vec: Vec<AST>, r: ASTVariants) -> Vec<AST> {
     fn try_join_strings(ast: AST, vec: &mut Vec<AST>) {
         match (&ast, vec.last_mut()) {
-            (AST::String(new_str), Some(AST::String(str))) => {
+            (AST::String(new_str, _), Some(AST::String(str, v))) => {
                 str.push_str(new_str);
+                *v = string_to_f64(&str);
             }
             _ => vec.push(ast)
         }
@@ -240,7 +243,10 @@ fn parse_block_arg(chars: &[char]) -> impl Fn(&str) -> IResult<&str, Vec<AST>> +
     move |i: &str| {
         fold_many0(
             alt((
-                map(parse_string(chars), |s| ASTVariants::ASTValue(AST::String(s))),
+                map(parse_string(chars), |s| {
+                    let v = string_to_f64(&s);
+                    ASTVariants::ASTValue(AST::String(s, v))
+                }),
                 map(parse_escaped_block, ASTVariants::ASTVec),
                 map(parse_set_block, ASTVariants::ASTValue),
                 map(parse_func_block, ASTVariants::ASTValue),
@@ -298,7 +304,8 @@ fn parse_func_block(input: &str) -> IResult<&str, AST> {
         ":" => loop {
             let (i, name) = parse_string(&[':', ';', '{', '}', '[', ']', '.'])(input)?;
             let (i, sep) = match_strings!(":", ";", "{", "}", "[", "]", ".")(i)?;
-            args.push(vec![AST::String(name)]);
+            let name_v = string_to_f64(&name);
+            args.push(vec![AST::String(name, name_v)]);
             input = i;
             match sep {
                 ":" => {
@@ -322,14 +329,15 @@ fn parse_func_block(input: &str) -> IResult<&str, AST> {
     let (input, body) = parse_block_arg(&['{', ';'])(input)?;
     let (input, _) = tag(";}")(input)?;
     args.push(body);
+    let name_v = string_to_f64(&name);
     Ok((input, AST::SetVar(
         VarAccess {
-            value: vec![AST::String(name)],
+            value: vec![AST::String(name, name_v)],
             accessors: Vec::new()
         },
         vec![AST::Variable(
             VarAccess {
-                value: vec![AST::String(String::from("lambda"))],
+                value: vec![AST::String(String::from("lambda"), None)],
                 accessors: vec![Accessor::Call(args)]
             }
         )]
@@ -352,23 +360,27 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
     let (input, _) = tag("{>")(input)?;
     let (input, mut body) = fold_many0(
         alt((
-            map(parse_string(&['{', '}']), |s| ASTVariants::ASTValue(AST::String(s))),
+            map(parse_string(&['{', '}']), |s| {
+                let v = string_to_f64(&s);
+                ASTVariants::ASTValue(AST::String(s, v))
+            }),
             map(parse_escaped_block, ASTVariants::ASTVec),
             map(parse_set_block, ASTVariants::ASTValue),
             map(parse_func_block, ASTVariants::ASTValue),
             map(parse_del_block, ASTVariants::ASTValue),
             map(parse_block, ASTVariants::ASTValue)
         )),
-        vec![AST::String(String::from("{"))],
+        vec![AST::String(String::from("{"), None)],
         add_block_arg
     )(input)?;
     let (input, _) = tag("}")(input)?;
     match body.last_mut() {
-        Some(AST::String(ref mut s)) => {
+        Some(AST::String(ref mut s, v)) => {
             s.push_str("}");
+            *v = None;
         }
         Some(_) | None => {
-            body.push(AST::String(String::from("}")))
+            body.push(AST::String(String::from("}"), None))
         }
     }
     Ok((input, body))
@@ -377,7 +389,10 @@ fn parse_escaped_block(input: &str) -> IResult<&str, Vec<AST>> {
 fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
     fold_many0(
         alt((
-            map(parse_string(&['{']), |s| ASTVariants::ASTValue(AST::String(s))),
+            map(parse_string(&['{']), |s| {
+                let v = string_to_f64(&s);
+                ASTVariants::ASTValue(AST::String(s, v))
+            }),
             map(parse_escaped_block, ASTVariants::ASTVec),
             map(parse_set_block, ASTVariants::ASTValue),
             map(parse_func_block, ASTVariants::ASTValue),

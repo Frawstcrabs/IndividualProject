@@ -17,7 +17,8 @@ pub fn add_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
 
     for arg in args {
         match &*arg.borrow() {
-            VarValues::Num(n) => {
+            VarValues::Num(n) |
+            VarValues::AstStr(_, Some(n))=> {
                 ret += *n;
             },
             VarValues::Str(s) => {
