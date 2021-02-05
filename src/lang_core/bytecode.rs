@@ -155,6 +155,7 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                             }
                             _ => unreachable!()
                         }
+                        *stackvals += 1;
                     },
                     _ => {
                         ast_var_access(prog, funcs, var);
