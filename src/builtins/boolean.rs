@@ -27,17 +27,17 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
             (AstStr(s, _), Nil) => {
                 s.is_empty()
             },
-            (Str(s1), Str(s2)) |
-            (AstStr(s1, _), Str(s2)) |
-            (Str(s1), AstStr(s2, _)) |
-            (AstStr(s1, None), AstStr(s2, None)) => {
-                s1 == s2
-            },
             (Num(n1), Num(n2)) |
             (AstStr(_, Some(n1)), Num(n2)) |
             (Num(n1), AstStr(_, Some(n2))) |
             (AstStr(_, Some(n1)), AstStr(_, Some(n2))) => {
                 n1 == n2
+            },
+            (Str(s1), Str(s2)) |
+            (AstStr(s1, _), Str(s2)) |
+            (Str(s1), AstStr(s2, _)) |
+            (AstStr(s1, _), AstStr(s2, _)) => {
+                s1 == s2
             },
             (Str(s), Num(n)) |
             (Num(n), Str(s)) => {
