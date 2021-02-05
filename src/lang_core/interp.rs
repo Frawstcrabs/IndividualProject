@@ -18,6 +18,7 @@ pub enum VarValues {
     Func(Vec<String>, Vec<Instruction>, Gc<Namespace>),
     RustFunc(fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>),
     RustClosure(Box<dyn Fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>>),
+    CatchResult(bool, Gc<VarValues>),
     List(Vec<Gc<VarValues>>),
 }
 
@@ -54,8 +55,13 @@ impl ToString for VarValues {
             VarValues::AstStr(s, _) => {
                 s.clone()
             },
-            VarValues::Func(_, _, _) | VarValues::RustFunc(_) | VarValues::RustClosure(_) => {
+            VarValues::Func(_, _, _) |
+            VarValues::RustFunc(_) |
+            VarValues::RustClosure(_) => {
                 String::from("<Function>")
+            },
+            VarValues::CatchResult(_, v) => {
+                v.borrow().to_string()
             },
             VarValues::List(_) => {
                 String::from("<List>")
@@ -82,6 +88,9 @@ impl From<&VarValues> for bool {
             VarValues::RustFunc(_) |
             VarValues::RustClosure(_) => {
                 true
+            },
+            VarValues::CatchResult(is_success, _) => {
+                *is_success
             },
             VarValues::List(vs) => {
                 !vs.is_empty()
@@ -127,6 +136,12 @@ impl fmt::Debug for VarValues {
             VarValues::RustClosure(_) => {
                 fmt.debug_tuple("RustClosure")
                     .field(&format_args!("_"))
+                    .finish()
+            },
+            VarValues::CatchResult(is_success, v) => {
+                fmt.debug_tuple("CatchResult")
+                    .field(is_success)
+                    .field(v)
                     .finish()
             },
             VarValues::List(vs) => {
@@ -221,6 +236,24 @@ impl VarValues {
                     }
                 }
             },
+            VarValues::CatchResult(is_success, v) => {
+                let name = index.borrow().to_string();
+                match &name[..] {
+                    "status" => {
+                        Ok(
+                            Gc::new(RefCell::new(
+                                VarValues::Num(if *is_success {1.0} else {0.0})
+                            ))
+                        )
+                    },
+                    "value" => {
+                        Ok(Gc::clone(v))
+                    },
+                    _ => {
+                        throw_string!("invalid attr")
+                    }
+                }
+            },
             _ => {
                 throw_string!("cannot get attr")
             },
@@ -231,9 +264,11 @@ impl VarValues {
         match self {
             VarValues::List(vs) => {
                 match &*index.borrow() {
-                    VarValues::Str(s) |
-                    VarValues::AstStr(s, None) => {
-                        let v = s.parse::<isize>().unwrap();
+                    VarValues::Str(s) => {
+                        let mut v = s.parse::<isize>().unwrap();
+                        if v < 0 {
+                            v += vs.len() as isize;
+                        }
                         if v < 0 || v as usize >= vs.len() {
                             return throw_string!("index out of range");
                         }
@@ -241,7 +276,13 @@ impl VarValues {
                     },
                     VarValues::Num(n) |
                     VarValues::AstStr(_, Some(n))=> {
-                        let v = *n as usize;
+                        let mut v = *n as usize;
+                        if v < 0 {
+                            v += vs.len();
+                        }
+                        if v < 0 || v as usize >= vs.len() {
+                            return throw_string!("index out of range");
+                        }
                         Ok(Gc::clone(&vs[v]))
                     },
                     _ => {
@@ -251,12 +292,46 @@ impl VarValues {
             },
             _ => {
                 throw_string!("cannot index")
-            }
+            },
         }
     }
 
     fn set_index(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
-        throw_string!("cannot set index")
+        match self {
+            VarValues::List(vs) => {
+                match &*index.borrow() {
+                    VarValues::Str(s) => {
+                        let mut v = s.parse::<isize>().unwrap();
+                        if v < 0 {
+                            v += vs.len() as isize;
+                        }
+                        if v < 0 || v as usize >= vs.len() {
+                            return throw_string!("index out of range");
+                        }
+                        vs[v as usize] = val;
+                        Ok(())
+                    },
+                    VarValues::Num(n) |
+                    VarValues::AstStr(_, Some(n))=> {
+                        let mut v = *n as usize;
+                        if v < 0 {
+                            v += vs.len();
+                        }
+                        if v < 0 || v as usize >= vs.len() {
+                            return throw_string!("index out of range");
+                        }
+                        vs[v as usize] = val;
+                        Ok(())
+                    },
+                    _ => {
+                        throw_string!("invalid index")
+                    },
+                }
+            },
+            _ => {
+                throw_string!("cannot set index")
+            },
+        }
     }
 
     fn set_attr(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
@@ -494,12 +569,20 @@ impl Context {
                 *counter += 1;
                 match self.catch_block(prog, counter) {
                     Ok(_) => {
-                        // TODO: wrap catch value in status object
+                        let top_val = self.stack.pop().unwrap();
+                        self.stack.push(
+                            Gc::new(RefCell::new(
+                                VarValues::CatchResult(true, top_val)
+                            ))
+                        );
                     },
-                    Err(LangError::Throw(v)) => {
+                    Err(LangError::Throw(err_val)) => {
                         self.stack.truncate(stack_size);
-                        // TODO: wrap catch value in status object
-                        self.stack.push(v);
+                        self.stack.push(
+                            Gc::new(RefCell::new(
+                                VarValues::CatchResult(false, err_val)
+                            ))
+                        );
                         *counter = *loc;
                         return Ok(());
                     }
