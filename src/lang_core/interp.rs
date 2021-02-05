@@ -334,7 +334,7 @@ impl VarValues {
         }
     }
 
-    fn set_attr(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
+    fn set_attr(&mut self, _obj: Gc<VarValues>, _index: Gc<VarValues>, _val: Gc<VarValues>) -> LangResult<()> {
         throw_string!("cannot set attr")
     }
 }
@@ -364,8 +364,43 @@ impl fmt::Debug for Namespace {
 
 pub struct Context {
     pub stack: Vec<Gc<VarValues>>,
+    loop_stack: Vec<usize>,
     cur_scope: Gc<Namespace>,
     global_scope: Gc<Namespace>,
+}
+
+fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
+    let mut values = values
+        .into_iter()
+        .filter(|v| {
+            match &*v.borrow() {
+                VarValues::Nil => false,
+                _ => true
+            }
+        })
+        .collect::<Vec<_>>();
+    match values.len() {
+        0 => {
+            // only nil values found
+            Gc::new(RefCell::new(VarValues::Nil))
+        }
+        1 => {
+            // nothing else to concat with
+            values.pop().unwrap()
+        }
+        _ => {
+            // multiple items, need to convert to strings first
+            let strings = values.into_iter()
+                .map(|v| v.borrow().to_string())
+                .collect::<Vec<_>>();
+            let string_len = strings.iter().map(|s| s.len()).sum();
+            let mut new_string = String::with_capacity(string_len);
+            for s in strings {
+                new_string.push_str(&s);
+            }
+            Gc::new(RefCell::new(VarValues::Str(new_string)))
+        }
+    }
 }
 
 impl Context {
@@ -378,6 +413,7 @@ impl Context {
         }));
         Context {
             stack: Vec::new(),
+            loop_stack: Vec::new(),
             cur_scope: Gc::clone(&global_scope),
             global_scope,
         }
@@ -415,37 +451,8 @@ impl Context {
             Instruction::CONCAT(n) => {
                 let n = *n;
                 if n >= 2 {
-                    let mut values = self.stack.split_off(self.stack.len() - n)
-                        .into_iter()
-                        .filter(|v| {
-                            match &*v.borrow() {
-                                VarValues::Nil => false,
-                                _ => true
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    match values.len() {
-                        0 => {
-                            // only nil values found
-                            self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));
-                        }
-                        1 => {
-                            // nothing else to concat with
-                            self.stack.push(values.pop().unwrap());
-                        }
-                        _ => {
-                            // multiple items, need to convert to strings first
-                            let strings = values.into_iter()
-                                .map(|v| v.borrow().to_string())
-                                .collect::<Vec<_>>();
-                            let string_len = strings.iter().map(|s| s.len()).sum();
-                            let mut new_string = String::with_capacity(string_len);
-                            for s in strings {
-                                new_string.push_str(&s);
-                            }
-                            self.stack.push(Gc::new(RefCell::new(VarValues::Str(new_string))));
-                        }
-                    }
+                    let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
+                    self.stack.push(concat_val);
                 }
             },
             Instruction::SETVAR => {
@@ -531,7 +538,8 @@ impl Context {
                 self.stack.push(obj.borrow().get_index(obj_clone, index)?);
             },
             Instruction::DELVAR => {
-
+                let name = self.stack.pop().unwrap().borrow().to_string();
+                self.cur_scope.borrow_mut().vars.remove(&name);
             },
             Instruction::DELATTR => {
 
@@ -563,6 +571,27 @@ impl Context {
                         VarValues::List(vals)
                     ))
                 );
+            },
+            Instruction::WHILESTART => {
+                self.loop_stack.push(0);
+            },
+            Instruction::WHILEINCR => {
+                *self.loop_stack.last_mut().unwrap() += 1;
+            },
+            Instruction::WHILEEND => {
+                let n = self.loop_stack.pop().unwrap();
+                match n {
+                    0 => {
+                        self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));
+                    },
+                    1 => {
+                        // no concat necessary
+                    },
+                    _ => {
+                        let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
+                        self.stack.push(concat_val);
+                    },
+                }
             },
             Instruction::STARTCATCH(loc) => {
                 let stack_size = self.stack.len();

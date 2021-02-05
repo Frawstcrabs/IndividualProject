@@ -4,14 +4,13 @@ mod builtins;
 use lang_core::{parse, bytecode, interp::{self, LangError}};
 
 fn main() {
-    let input = "
-    {!>oneline}
-    {set:a:{list;};}
-    {func:{call_3:f;}:
-        {f:1;}{f:2;}{f:3;}
-    ;}
-    {call_3:{a.push};}
-    {a[0]} {a[2]} {a[1]}";
+    let input = "{!>oneline}
+
+    {set:i:0;}
+    {while:{ne:{i}:10;}:
+        abc
+        {set:i:{add:{i}:1;};}
+    ;}";
     //println!("{:?}", input);
     let ast = match parse::run_parser(input) {
         Ok(v) => v,

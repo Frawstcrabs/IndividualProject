@@ -21,6 +21,9 @@ pub enum Instruction {
     DELINDEX,
     DELATTR,
     SETNONLOCAL,
+    WHILESTART,
+    WHILEINCR,
+    WHILEEND,
     STARTCATCH(usize),
     ENDCATCH,
     THROWVAL,
@@ -155,6 +158,26 @@ fn ast_bytecode(prog: &mut Vec<Instruction>, funcs: &mut Vec<(usize, Vec<Instruc
                             }
                             _ => unreachable!()
                         }
+                        *stackvals += 1;
+                    },
+                    "while" => {
+                        assert!(args.len() == 2);
+                        prog.push(Instruction::WHILESTART);
+                        let test_start = prog.len();
+                        ast_vec_bytecode(prog, funcs, &args[0]);
+                        let false_jump = prog.len();
+                        prog.push(Instruction::IFFALSE(0));
+                        ast_vec_bytecode(prog, funcs, &args[1]);
+                        prog.push(Instruction::WHILEINCR);
+                        prog.push(Instruction::GOTO(test_start));
+                        let loop_end = prog.len();
+                        match &mut prog[false_jump] {
+                            Instruction::IFFALSE(ptr) => {
+                                *ptr = loop_end;
+                            },
+                            _ => unreachable!(),
+                        }
+                        prog.push(Instruction::WHILEEND);
                         *stackvals += 1;
                     },
                     _ => {
