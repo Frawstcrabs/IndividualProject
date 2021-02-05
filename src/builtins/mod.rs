@@ -23,5 +23,6 @@ macro_rules! add_func {
 
 pub fn register_builtins(vars: &mut HashMap<String, VarRefType>) {
     add_func!(vars, boolean::eq_func, "eq");
+    add_func!(vars, boolean::ne_func, "ne");
     add_func!(vars, math::add_func, "add");
 }
