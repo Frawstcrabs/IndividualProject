@@ -1,9 +1,9 @@
 use crate::bytecode::Instruction;
 use crate::builtins::register_builtins;
-use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use libgc::{Gc as Gc_};
 
 pub enum LangError {
     Throw(Gc<VarValues>),
@@ -32,9 +32,9 @@ pub fn f64_to_string(n: f64) -> String {
 
 pub fn string_to_f64(s: &str) -> Option<f64> {
     if s.starts_with("0b") {
-        u64::from_str_radix(s, 2).map(|v| v as f64).ok()
+        u64::from_str_radix(&s[2..], 2).map(|v| v as f64).ok()
     } else if s.starts_with("0x") {
-        u64::from_str_radix(s, 16).map(|v| v as f64).ok()
+        u64::from_str_radix(&s[2..], 16).map(|v| v as f64).ok()
     } else {
         s.parse::<f64>().ok()
     }
@@ -339,8 +339,7 @@ impl VarValues {
     }
 }
 
-// todo: add actual garbage collector
-pub type Gc<T> = Rc<RefCell<T>>;
+pub type Gc<T> = Gc_<RefCell<T>>;
 
 #[derive(Debug)]
 pub enum VarRefType {

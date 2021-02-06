@@ -3,6 +3,11 @@ mod builtins;
 
 use lang_core::{parse, bytecode, interp::{self, LangError}};
 
+use libgc::{GcAllocator};
+
+#[global_allocator]
+static ALLOCATOR: GcAllocator = GcAllocator;
+
 fn main() {
     let input = "{!>oneline}
 
