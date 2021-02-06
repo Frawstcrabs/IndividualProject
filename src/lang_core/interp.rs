@@ -164,6 +164,19 @@ macro_rules! throw_string {
     };
 }
 
+fn validate_list_index(mut v: f64, max: usize) -> LangResult<usize> {
+    if v.fract() != 0.0 {
+        return throw_string!("invalid index");
+    }
+    if v < 0.0 {
+        v += max as f64;
+    }
+    if v < 0.0 || v as usize >= max {
+        return throw_string!("index out of range");
+    }
+    Ok(v as usize)
+}
+
 impl VarValues {
     fn call(&self, ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<()> {
         match self {
@@ -210,6 +223,7 @@ impl VarValues {
             },
         }
     }
+
     fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(_) => {
@@ -260,29 +274,22 @@ impl VarValues {
         }
     }
 
-    fn get_index(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
+    fn get_index(&self, _obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
                 match &*index.borrow() {
                     VarValues::Str(s) => {
-                        let mut v = s.parse::<isize>().unwrap();
-                        if v < 0 {
-                            v += vs.len() as isize;
-                        }
-                        if v < 0 || v as usize >= vs.len() {
-                            return throw_string!("index out of range");
-                        }
-                        Ok(Gc::clone(&vs[v as usize]))
+                        let v = match string_to_f64(s) {
+                            Some(v) => validate_list_index(v, vs.len())?,
+                            None => {
+                                return throw_string!("invalid index");
+                            }
+                        };
+                        Ok(Gc::clone(&vs[v]))
                     },
                     VarValues::Num(n) |
                     VarValues::AstStr(_, Some(n))=> {
-                        let mut v = *n as usize;
-                        if v < 0 {
-                            v += vs.len();
-                        }
-                        if v < 0 || v as usize >= vs.len() {
-                            return throw_string!("index out of range");
-                        }
+                        let v = validate_list_index(*n, vs.len())?;
                         Ok(Gc::clone(&vs[v]))
                     },
                     _ => {
@@ -296,31 +303,24 @@ impl VarValues {
         }
     }
 
-    fn set_index(&mut self, obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
+    fn set_index(&mut self, _obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
                 match &*index.borrow() {
                     VarValues::Str(s) => {
-                        let mut v = s.parse::<isize>().unwrap();
-                        if v < 0 {
-                            v += vs.len() as isize;
-                        }
-                        if v < 0 || v as usize >= vs.len() {
-                            return throw_string!("index out of range");
-                        }
-                        vs[v as usize] = val;
+                        let v = match string_to_f64(s) {
+                            Some(v) => validate_list_index(v, vs.len())?,
+                            None => {
+                                return throw_string!("invalid index");
+                            }
+                        };
+                        vs[v] = val;
                         Ok(())
                     },
                     VarValues::Num(n) |
                     VarValues::AstStr(_, Some(n))=> {
-                        let mut v = *n as usize;
-                        if v < 0 {
-                            v += vs.len();
-                        }
-                        if v < 0 || v as usize >= vs.len() {
-                            return throw_string!("index out of range");
-                        }
-                        vs[v as usize] = val;
+                        let v = validate_list_index(*n, vs.len())?;
+                        vs[v] = val;
                         Ok(())
                     },
                     _ => {
