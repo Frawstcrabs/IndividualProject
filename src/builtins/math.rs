@@ -4,51 +4,36 @@ use crate::lang_core::interp::{
     LangError,
     VarValues,
     Context,
-    Gc,
-    string_to_f64,
+    Gc
 };
 use std::cell::RefCell;
 
-pub(crate) fn val_to_f64(val: &Gc<VarValues>, func_name: &str) -> LangResult<f64> {
-    match &*val.borrow() {
-        VarValues::Num(n) |
-        VarValues::AstStr(_, Some(n))=> {
-            Ok(*n)
-        },
-        VarValues::Str(s) => {
-            match string_to_f64(s) {
-                Some(v) => Ok(v),
-                None => {
-                    return throw_string!("<{}:invalid num>", func_name);
-                },
-            }
-        },
-        _ => {
-            return throw_string!("<{}:invalid num>", func_name);
-        },
+pub fn add_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    if args.len() < 2 {
+        return throw_string!("<add:expected 2 args, got {}>", args.len());
     }
-}
 
-macro_rules! math_func {
-    ($func_name:ident, $lang_name:expr, $args_name:ident, $test:expr, $arg_count:expr, $op:tt) => {
-        pub fn $func_name(_ctx: &mut Context, $args_name: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
-            if $test {
-                return throw_string!(concat!("<", $lang_name, ":expected ", $arg_count, " args, got {}>"), $args_name.len());
-            }
+    let mut ret = 0.0;
 
-            let mut ret = val_to_f64(&$args_name[0], $lang_name)?;
-
-            for arg in &$args_name[1..] {
-                ret = ret $op val_to_f64(arg, $lang_name)?;
-            }
-
-            Ok(Gc::new(RefCell::new(VarValues::Num(ret))))
+    for arg in args {
+        match &*arg.borrow() {
+            VarValues::Num(n) |
+            VarValues::AstStr(_, Some(n))=> {
+                ret += *n;
+            },
+            VarValues::Str(s) => {
+                ret += match s.parse::<f64>() {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return throw_string!("<add:invalid num>");
+                    }
+                };
+            },
+            _ => {
+                return throw_string!("<add:invalid num>");
+            },
         }
     }
-}
 
-math_func!(add_func, "add", args, args.len() < 2, "2+", +);
-math_func!(sub_func, "sub", args, args.len() != 2, "2", -);
-math_func!(mul_func, "mul", args, args.len() < 2, "2+", *);
-math_func!(fdiv_func, "fdiv", args, args.len() != 2, "2", /);
-math_func!(mod_func, "mod", args, args.len() != 2, "2", %);
+    Ok(Gc::new(RefCell::new(VarValues::Num(ret))))
+}
