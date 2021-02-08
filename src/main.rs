@@ -12,10 +12,7 @@ fn main() {
     let input = "{!>oneline}
 
     {set:i:0;}
-    {while:{ne:{i}:10;}:
-        abc
-        {set:i:{add:{i}:1;};}
-    ;}";
+    {not:{i};}";
     //println!("{:?}", input);
     let ast = match parse::run_parser(input) {
         Ok(v) => v,

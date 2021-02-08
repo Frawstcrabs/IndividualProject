@@ -7,6 +7,7 @@ use crate::lang_core::interp::{
     Gc,
     f64_to_string,
 };
+use crate::builtins::math::val_to_f64;
 use std::cell::RefCell;
 
 fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
@@ -43,6 +44,18 @@ fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
     }
 }
 
+pub fn not_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    if args.len() != 1 {
+        return throw_string!("<eq:expected 1 arg, got {}>", args.len());
+    }
+    let bool_val: bool = (&*args[0].borrow()).into();
+    return Ok(
+        Gc::new(RefCell::new(
+            VarValues::Num(if !bool_val {1.0} else {0.0})
+        ))
+    );
+}
+
 pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
     if args.len() < 2 {
         return throw_string!("<eq:expected 2 args, got {}>", args.len());
@@ -76,3 +89,29 @@ pub fn ne_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
 
     Ok(Gc::new(RefCell::new(VarValues::Num(1.0))))
 }
+
+macro_rules! num_comp_func {
+    ($func_name:ident, $lang_name:expr, $op:tt) => {
+        pub fn $func_name(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+            if args.len() != 2 {
+                return throw_string!(concat!("<", $lang_name, ":expected 2 args, got {}>"), args.len());
+            }
+            use VarValues::Num;
+            let mut item1 = val_to_f64(&args[0], $lang_name)?;
+            for item2 in &args[1..] {
+                let item2 = val_to_f64(item2, $lang_name)?;
+                if !(item1 $op item2) {
+                    return Ok(Gc::new(RefCell::new(Num(0.0))));
+                }
+                item1 = item2;
+            }
+
+            Ok(Gc::new(RefCell::new(Num(1.0))))
+        }
+    }
+}
+
+num_comp_func!(lt_func, "lt", <);
+num_comp_func!(gt_func, "gt", >);
+num_comp_func!(le_func, "le", <=);
+num_comp_func!(ge_func, "ge", >=);
