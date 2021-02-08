@@ -361,13 +361,9 @@ impl fmt::Debug for Namespace {
     }
 }
 
-enum LoopFrame {
-    While(usize),
-}
-
 pub struct Context {
     pub stack: Vec<Gc<VarValues>>,
-    loop_stack: Vec<LoopFrame>,
+    loop_stack: Vec<usize>,
     cur_scope: Gc<Namespace>,
     global_scope: Gc<Namespace>,
 }
@@ -576,23 +572,13 @@ impl Context {
                 );
             },
             Instruction::WHILESTART => {
-                self.loop_stack.push(LoopFrame::While(0));
+                self.loop_stack.push(0);
             },
             Instruction::WHILEINCR => {
-                match self.loop_stack.last_mut().unwrap() {
-                    LoopFrame::While(counter) => {
-                        *counter += 1;
-                    },
-                    _ => {
-                        panic!("incorrect loop type on stack");
-                    },
-                }
+                *self.loop_stack.last_mut().unwrap() += 1;
             },
             Instruction::WHILEEND => {
-                let n = match self.loop_stack.pop().unwrap() {
-                    LoopFrame::While(counter) => counter,
-                    _ => panic!("incorrect loop type on stack")
-                };
+                let n = self.loop_stack.pop().unwrap();
                 match n {
                     0 => {
                         self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));
