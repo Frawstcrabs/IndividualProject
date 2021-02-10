@@ -1,6 +1,6 @@
 use crate::bytecode::Instruction;
 use crate::builtins::register_builtins;
-use std::cell::RefCell;
+use std::sync::RwLock;
 use std::collections::HashMap;
 use std::fmt;
 use libgc::{Gc as Gc_};
@@ -21,6 +21,9 @@ pub enum VarValues {
     CatchResult(bool, Gc<VarValues>),
     List(Vec<Gc<VarValues>>),
 }
+
+unsafe impl Send for VarValues {}
+unsafe impl Sync for VarValues {}
 
 pub fn f64_to_string(n: f64) -> String {
     let mut ret = n.to_string();
@@ -61,7 +64,7 @@ impl ToString for VarValues {
                 String::from("<Function>")
             },
             VarValues::CatchResult(_, v) => {
-                v.borrow().to_string()
+                v.read().unwrap().to_string()
             },
             VarValues::List(_) => {
                 String::from("<List>")
@@ -154,12 +157,17 @@ impl fmt::Debug for VarValues {
 }
 
 #[macro_export]
+macro_rules! new_value {
+    ($val:expr) => {Gc::new(RwLock::new($val))};
+}
+
+#[macro_export]
 macro_rules! throw_string {
     ($($args:expr),+) => {
         Err(LangError::Throw(
-            Gc::new(RefCell::new(
+            new_value!(
                 VarValues::Str(format!($($args),+))
-            ))
+            )
         ))
     };
 }
@@ -192,17 +200,17 @@ impl VarValues {
                     vars.insert(
                         String::from("args"),
                         VarRefType::Value(
-                            Gc::new(RefCell::new(
+                            new_value!(
                                 VarValues::List(args)
-                            ))
+                            )
                         )
                     );
                 }
                 let old_scope = Gc::clone(&ctx.cur_scope);
-                let new_ns = Gc::new(RefCell::new(Namespace {
+                let new_ns = new_value!(Namespace {
                     vars,
                     outer_scope: Some(Gc::clone(&outer_scope)),
-                }));
+                });
                 ctx.cur_scope = new_ns;
                 ctx.interpret(inst)?;
                 ctx.cur_scope = old_scope;
@@ -227,22 +235,22 @@ impl VarValues {
     fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(_) => {
-                let name = index.borrow().to_string();
+                let name = index.read().unwrap().to_string();
                 match &name[..] {
                     "push" => {
                         let method = move |_ctx: &mut Context, args: Vec<Gc<VarValues>>| {
-                            match &mut *obj.borrow_mut() {
+                            match &mut *obj.write().unwrap() {
                                 VarValues::List(vals) => {
                                     vals.extend(args);
-                                    Ok(Gc::new(RefCell::new(VarValues::Nil)))
+                                    Ok(new_value!(VarValues::Nil))
                                 }
                                 _ => unreachable!()
                             }
                         };
                         Ok(
-                            Gc::new(RefCell::new(
+                            new_value!(
                                 VarValues::RustClosure(Box::new(method))
-                            ))
+                            )
                         )
                     },
                     _ => {
@@ -251,13 +259,13 @@ impl VarValues {
                 }
             },
             VarValues::CatchResult(is_success, v) => {
-                let name = index.borrow().to_string();
+                let name = index.read().unwrap().to_string();
                 match &name[..] {
                     "status" => {
                         Ok(
-                            Gc::new(RefCell::new(
+                            new_value!(
                                 VarValues::Num(if *is_success {1.0} else {0.0})
-                            ))
+                            )
                         )
                     },
                     "value" => {
@@ -277,7 +285,7 @@ impl VarValues {
     fn get_index(&self, _obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
-                match &*index.borrow() {
+                match &*index.read().unwrap() {
                     VarValues::Str(s) => {
                         let v = match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -306,7 +314,7 @@ impl VarValues {
     fn set_index(&mut self, _obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
-                match &*index.borrow() {
+                match &*index.read().unwrap() {
                     VarValues::Str(s) => {
                         let v = match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -339,7 +347,7 @@ impl VarValues {
     }
 }
 
-pub type Gc<T> = Gc_<RefCell<T>>;
+pub type Gc<T> = Gc_<RwLock<T>>;
 
 #[derive(Debug)]
 pub enum VarRefType {
@@ -351,6 +359,9 @@ pub struct Namespace {
     vars: HashMap<String, VarRefType>,
     outer_scope: Option<Gc<Namespace>>,
 }
+
+unsafe impl Send for Namespace {}
+unsafe impl Sync for Namespace {}
 
 impl fmt::Debug for Namespace {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -376,7 +387,7 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
     let mut values = values
         .into_iter()
         .filter(|v| {
-            match &*v.borrow() {
+            match &*v.read().unwrap() {
                 VarValues::Nil => false,
                 _ => true
             }
@@ -385,7 +396,7 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
     match values.len() {
         0 => {
             // only nil values found
-            Gc::new(RefCell::new(VarValues::Nil))
+            new_value!(VarValues::Nil)
         }
         1 => {
             // nothing else to concat with
@@ -394,14 +405,14 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
         _ => {
             // multiple items, need to convert to strings first
             let strings = values.into_iter()
-                .map(|v| v.borrow().to_string())
+                .map(|v| v.read().unwrap().to_string())
                 .collect::<Vec<_>>();
             let string_len = strings.iter().map(|s| s.len()).sum();
             let mut new_string = String::with_capacity(string_len);
             for s in strings {
                 new_string.push_str(&s);
             }
-            Gc::new(RefCell::new(VarValues::Str(new_string)))
+            new_value!(VarValues::Str(new_string))
         }
     }
 }
@@ -410,10 +421,10 @@ impl Context {
     pub fn new() -> Self {
         let mut global_vars = HashMap::new();
         register_builtins(&mut global_vars);
-        let global_scope = Gc::new(RefCell::new(Namespace {
+        let global_scope = new_value!(Namespace {
             vars: global_vars,
             outer_scope: None,
-        }));
+        });
         Context {
             stack: Vec::new(),
             loop_stack: Vec::new(),
@@ -421,27 +432,28 @@ impl Context {
             global_scope,
         }
     }
+    #[inline]
     fn interpret_inst(&mut self, prog: &[Instruction], counter: &mut usize) -> LangResult<()> {
         match &prog[*counter] {
             Instruction::PUSHSTR(s) => {
                 self.stack.push(
-                    Gc::new(RefCell::new(
+                    new_value!(
                         VarValues::Str(s.clone())
-                    ))
+                    )
                 );
             },
             Instruction::PUSHASTSTR(s, v) => {
                 self.stack.push(
-                    Gc::new(RefCell::new(
+                    new_value!(
                         VarValues::AstStr(s.clone(), *v)
-                    ))
+                    )
                 );
             },
             Instruction::PUSHNIL => {
-                self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));
+                self.stack.push(new_value!(VarValues::Nil));
             },
             Instruction::IFFALSE(i) => {
-                let test: bool = (&*self.stack.pop().unwrap().borrow()).into();
+                let test: bool = (&*self.stack.pop().unwrap().read().unwrap()).into();
                 if !test {
                     *counter = *i;
                     return Ok(());
@@ -458,13 +470,16 @@ impl Context {
                     self.stack.push(concat_val);
                 }
             },
+            Instruction::DROP(n) => {
+                self.stack.truncate(self.stack.len() - *n);
+            },
             Instruction::SETVAR => {
                 let value = self.stack.pop().unwrap();
-                let name = self.stack.pop().unwrap().borrow().to_string();
+                let name = self.stack.pop().unwrap().read().unwrap().to_string();
                 let mut ns = Gc::clone(&self.cur_scope);
                 loop {
                     let cur_ns = Gc::clone(&ns);
-                    let mut ns_ref = cur_ns.borrow_mut();
+                    let mut ns_ref = cur_ns.write().unwrap();
                     match ns_ref.vars.get_mut(&name) {
                         Some(VarRefType::NonLocal) => match &ns_ref.outer_scope {
                             Some(new_ns) => {
@@ -490,26 +505,26 @@ impl Context {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                obj.borrow_mut().set_attr(obj_clone, index, val)?;
+                obj.write().unwrap().set_attr(obj_clone, index, val)?;
             },
             Instruction::SETINDEX => {
                 let val = self.stack.pop().unwrap();
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                obj.borrow_mut().set_index(obj_clone, index, val)?;
+                obj.write().unwrap().set_index(obj_clone, index, val)?;
             },
             Instruction::SETNONLOCAL => {
-                let name = self.stack.pop().unwrap().borrow().to_string();
-                self.cur_scope.borrow_mut().vars.insert(name, VarRefType::NonLocal);
+                let name = self.stack.pop().unwrap().read().unwrap().to_string();
+                self.cur_scope.write().unwrap().vars.insert(name, VarRefType::NonLocal);
             },
             Instruction::GETVAR => {
-                let name = self.stack.pop().unwrap().borrow().to_string();
+                let name = self.stack.pop().unwrap().read().unwrap().to_string();
                 let mut ns = Gc::clone(&self.cur_scope);
                 let var_value;
                 loop {
                     let cur_ns = Gc::clone(&ns);
-                    let ns_ref = cur_ns.borrow();
+                    let ns_ref = cur_ns.read().unwrap();
                     match ns_ref.vars.get(&name) {
                         Some(VarRefType::Value(v)) => {
                             var_value = Gc::clone(v);
@@ -520,7 +535,7 @@ impl Context {
                                 ns = Gc::clone(new_ns);
                             }
                             None => {
-                                var_value = Gc::new(RefCell::new(VarValues::Str(format!("<{}:unknown var>", name))));
+                                var_value = new_value!(VarValues::Str(format!("<{}:unknown var>", name)));
                                 break;
                             }
                         }
@@ -532,17 +547,17 @@ impl Context {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                self.stack.push(obj.borrow().get_attr(obj_clone, index)?);
+                self.stack.push(obj.read().unwrap().get_attr(obj_clone, index)?);
             },
             Instruction::GETINDEX => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                self.stack.push(obj.borrow().get_index(obj_clone, index)?);
+                self.stack.push(obj.read().unwrap().get_index(obj_clone, index)?);
             },
             Instruction::DELVAR => {
-                let name = self.stack.pop().unwrap().borrow().to_string();
-                self.cur_scope.borrow_mut().vars.remove(&name);
+                let name = self.stack.pop().unwrap().read().unwrap().to_string();
+                self.cur_scope.write().unwrap().vars.remove(&name);
             },
             Instruction::DELATTR => {
 
@@ -554,25 +569,25 @@ impl Context {
                 let loc = *loc;
                 let size = *size;
                 self.stack.push(
-                    Gc::new(RefCell::new(VarValues::Func(
+                    new_value!(VarValues::Func(
                         arg_names.clone(),
                         prog[loc..loc+size].to_vec(),
                         Gc::clone(&self.cur_scope)
-                    )))
+                    ))
                 );
             },
             Instruction::CALLFUNC(arg_size) => {
                 let arg_size = *arg_size;
                 let args = self.stack.split_off(self.stack.len() - arg_size);
                 let called_var = self.stack.pop().unwrap();
-                called_var.borrow().call(self, args)?;
+                called_var.read().unwrap().call(self, args)?;
             },
             Instruction::CREATELIST(n) => {
                 let vals = self.stack.split_off(self.stack.len() - n);
                 self.stack.push(
-                    Gc::new(RefCell::new(
+                    new_value!(
                         VarValues::List(vals)
-                    ))
+                    )
                 );
             },
             Instruction::WHILESTART => {
@@ -595,12 +610,13 @@ impl Context {
                 };
                 match n {
                     0 => {
-                        self.stack.push(Gc::new(RefCell::new(VarValues::Nil)));
+                        self.stack.push(new_value!(VarValues::Nil));
                     },
                     1 => {
                         // no concat necessary
                     },
                     _ => {
+                        println!("{}, {}", self.stack.len(), n);
                         let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
                         self.stack.push(concat_val);
                     },
@@ -613,17 +629,17 @@ impl Context {
                     Ok(_) => {
                         let top_val = self.stack.pop().unwrap();
                         self.stack.push(
-                            Gc::new(RefCell::new(
+                            new_value!(
                                 VarValues::CatchResult(true, top_val)
-                            ))
+                            )
                         );
                     },
                     Err(LangError::Throw(err_val)) => {
                         self.stack.truncate(stack_size);
                         self.stack.push(
-                            Gc::new(RefCell::new(
+                            new_value!(
                                 VarValues::CatchResult(false, err_val)
-                            ))
+                            )
                         );
                         *counter = *loc;
                         return Ok(());

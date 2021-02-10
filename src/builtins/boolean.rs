@@ -1,4 +1,4 @@
-use crate::throw_string;
+use crate::{throw_string, new_value};
 use crate::lang_core::interp::{
     LangResult,
     LangError,
@@ -8,11 +8,11 @@ use crate::lang_core::interp::{
     f64_to_string,
 };
 use crate::builtins::math::val_to_f64;
-use std::cell::RefCell;
+use std::sync::RwLock;
 
 fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
     use VarValues::*;
-    match (&*item1.borrow(), &*item2.borrow()) {
+    match (&*item1.read().unwrap(), &*item2.read().unwrap()) {
         (Nil, Nil) => {
             true
         },
@@ -48,11 +48,11 @@ pub fn not_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
     if args.len() != 1 {
         return throw_string!("<eq:expected 1 arg, got {}>", args.len());
     }
-    let bool_val: bool = (&*args[0].borrow()).into();
+    let bool_val: bool = (&*args[0].read().unwrap()).into();
     return Ok(
-        Gc::new(RefCell::new(
+        new_value!(
             VarValues::Num(if !bool_val {1.0} else {0.0})
-        ))
+        )
     );
 }
 
@@ -65,12 +65,12 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     for item2 in &args[1..] {
         use VarValues::*;
         if !test_equality(item1, item2) {
-            return Ok(Gc::new(RefCell::new(Num(0.0))));
+            return Ok(new_value!(Num(0.0)));
         }
         item1 = item2;
     }
 
-    Ok(Gc::new(RefCell::new(VarValues::Num(1.0))))
+    Ok(new_value!(VarValues::Num(1.0)))
 }
 
 pub fn ne_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
@@ -82,12 +82,12 @@ pub fn ne_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     for item2 in &args[1..] {
         use VarValues::*;
         if test_equality(item1, item2) {
-            return Ok(Gc::new(RefCell::new(Num(0.0))));
+            return Ok(new_value!(Num(0.0)));
         }
         item1 = item2;
     }
 
-    Ok(Gc::new(RefCell::new(VarValues::Num(1.0))))
+    Ok(new_value!(VarValues::Num(1.0)))
 }
 
 macro_rules! num_comp_func {
@@ -101,12 +101,12 @@ macro_rules! num_comp_func {
             for item2 in &args[1..] {
                 let item2 = val_to_f64(item2, $lang_name)?;
                 if !(item1 $op item2) {
-                    return Ok(Gc::new(RefCell::new(Num(0.0))));
+                    return Ok(new_value!(Num(0.0)));
                 }
                 item1 = item2;
             }
 
-            Ok(Gc::new(RefCell::new(Num(1.0))))
+            Ok(new_value!(Num(1.0)))
         }
     }
 }

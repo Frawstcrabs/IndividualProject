@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::sync::RwLock;
 use crate::lang_core::interp::{VarValues, Gc, VarRefType};
-use std::cell::RefCell;
+use crate::new_value;
 
 mod boolean;
 mod math;
@@ -8,7 +9,7 @@ mod math;
 macro_rules! add_func {
     ($vars:expr, $func:expr, $($names:expr),+) => {
         {
-            let val = VarRefType::Value(Gc::new(RefCell::new(VarValues::RustFunc($func))));
+            let val = VarRefType::Value(new_value!(VarValues::RustFunc($func)));
             add_func!(__impl $vars, val, $($names),+);
         }
     };

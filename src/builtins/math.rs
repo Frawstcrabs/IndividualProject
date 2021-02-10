@@ -1,4 +1,4 @@
-use crate::throw_string;
+use crate::{throw_string, new_value};
 use crate::lang_core::interp::{
     LangResult,
     LangError,
@@ -7,10 +7,10 @@ use crate::lang_core::interp::{
     Gc,
     string_to_f64,
 };
-use std::cell::RefCell;
+use std::sync::RwLock;
 
 pub(crate) fn val_to_f64(val: &Gc<VarValues>, func_name: &str) -> LangResult<f64> {
-    match &*val.borrow() {
+    match &*val.read().unwrap() {
         VarValues::Num(n) |
         VarValues::AstStr(_, Some(n))=> {
             Ok(*n)
@@ -42,7 +42,7 @@ macro_rules! math_func {
                 ret = ret $op val_to_f64(arg, $lang_name)?;
             }
 
-            Ok(Gc::new(RefCell::new(VarValues::Num(ret))))
+            Ok(new_value!(VarValues::Num(ret)))
         }
     }
 }
