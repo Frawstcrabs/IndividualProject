@@ -34,6 +34,7 @@ pub enum Instruction {
 struct CompilerCtx {
     prog: Vec<Instruction>,
     funcs: Vec<(usize, Vec<Instruction>)>,
+    in_function: bool,
 }
 
 fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) {
@@ -141,8 +142,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, stack_vals: &mut usize) {
                         *stack_vals += 1;
                     },
                     "nonlocal" => {
-                        // TODO: compile this only inside function bodies
                         assert!(args.len() == 1);
+                        if !ctx.in_function {
+                            panic!("nonlocal only allowed in functions");
+                        }
                         ast_vec_bytecode(ctx, &args[0]);
                         ctx.prog.push(Instruction::SETNONLOCAL);
                     },
@@ -327,6 +330,7 @@ fn ast_compile_function(ctx: &mut CompilerCtx, args: &[Vec<AST>]) {
     let mut func_ctx = CompilerCtx {
         prog: Vec::new(),
         funcs: Vec::new(),
+        in_function: true,
     };
     ast_vec_bytecode(&mut func_ctx, &args[args.len() - 1]);
     func_ctx.prog.push(Instruction::END);
@@ -375,6 +379,7 @@ pub fn generate_bytecode(ast: &[AST]) -> Vec<Instruction> {
     let mut ctx = CompilerCtx {
         prog: Vec::new(),
         funcs: Vec::new(),
+        in_function: false,
     };
     ast_vec_bytecode(&mut ctx, ast);
     ctx.prog.push(Instruction::END);
