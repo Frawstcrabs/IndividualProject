@@ -22,6 +22,7 @@ pub enum VarValues {
     List(Vec<Gc<VarValues>>),
 }
 
+// TODO: check if this is safe
 unsafe impl Send for VarValues {}
 unsafe impl Sync for VarValues {}
 
@@ -360,6 +361,7 @@ pub struct Namespace {
     outer_scope: Option<Gc<Namespace>>,
 }
 
+// TODO: check if this is safe
 unsafe impl Send for Namespace {}
 unsafe impl Sync for Namespace {}
 
