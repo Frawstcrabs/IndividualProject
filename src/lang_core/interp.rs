@@ -4,6 +4,7 @@ use std::sync::RwLock;
 use std::collections::HashMap;
 use std::fmt;
 use libgc::{Gc as Gc_};
+use nom::character::complete::newline;
 
 pub enum LangError {
     Throw(Gc<VarValues>),
@@ -185,6 +186,25 @@ fn validate_list_index(mut v: f64, max: usize) -> LangResult<usize> {
     }
     Ok(v as usize)
 }
+fn index_val_str(s: &str, index: f64) -> LangResult<Gc<VarValues>> {
+    if index.fract() != 0.0 {
+        return throw_string!("invalid index");
+    }
+    let index = index as isize;
+    if index >= 0 {
+        let index = index as usize;
+        match s.chars().nth(index) {
+            Some(c) => Ok(new_value!(VarValues::Str(c.to_string()))),
+            None => throw_string!("index out of range")
+        }
+    } else {
+        let index = (-1 - index) as usize;
+        match s.chars().nth_back(index) {
+            Some(c) => Ok(new_value!(VarValues::Str(c.to_string()))),
+            None => throw_string!("index out of range")
+        }
+    }
+}
 
 impl VarValues {
     fn call(&self, ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<()> {
@@ -286,26 +306,66 @@ impl VarValues {
     fn get_index(&self, _obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
-                match &*index.read().unwrap() {
+                let i = match &*index.read().unwrap() {
                     VarValues::Str(s) => {
-                        let v = match string_to_f64(s) {
+                        match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
                             None => {
                                 return throw_string!("invalid index");
                             }
-                        };
-                        Ok(Gc::clone(&vs[v]))
+                        }
                     },
                     VarValues::Num(n) |
                     VarValues::AstStr(_, Some(n))=> {
-                        let v = validate_list_index(*n, vs.len())?;
-                        Ok(Gc::clone(&vs[v]))
+                        validate_list_index(*n, vs.len())?
                     },
                     _ => {
-                        throw_string!("invalid index")
+                        return throw_string!("invalid index");
                     },
-                }
+                };
+                Ok(Gc::clone(&vs[i]))
             },
+            VarValues::Str(s) |
+            VarValues::AstStr(s, _) => {
+                let v = match &*index.read().unwrap() {
+                    VarValues::Str(s) => {
+                        match string_to_f64(s) {
+                            Some(v) => v,
+                            None => {
+                                return throw_string!("invalid index");
+                            }
+                        }
+                    },
+                    VarValues::Num(n) |
+                    VarValues::AstStr(_, Some(n))=> {
+                        *n
+                    },
+                    _ => {
+                        return throw_string!("invalid index");
+                    },
+                };
+                index_val_str(s, v)
+            },
+            VarValues::Num(n) => {
+                let v = match &*index.read().unwrap() {
+                    VarValues::Str(s) => {
+                        match string_to_f64(s) {
+                            Some(v) => v,
+                            None => {
+                                return throw_string!("invalid index");
+                            }
+                        }
+                    },
+                    VarValues::Num(n) |
+                    VarValues::AstStr(_, Some(n))=> {
+                        *n
+                    },
+                    _ => {
+                        return throw_string!("invalid index");
+                    },
+                };
+                index_val_str(&f64_to_string(*n), v)
+            }
             _ => {
                 throw_string!("cannot index")
             },
@@ -618,7 +678,6 @@ impl Context {
                         // no concat necessary
                     },
                     _ => {
-                        println!("{}, {}", self.stack.len(), n);
                         let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
                         self.stack.push(concat_val);
                     },
