@@ -375,27 +375,25 @@ impl VarValues {
     fn set_index(&mut self, _obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
-                match &*index.read().unwrap() {
+                let v = match &*index.read().unwrap() {
                     VarValues::Str(s) => {
-                        let v = match string_to_f64(s) {
+                        match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
                             None => {
                                 return throw_string!("invalid index");
                             }
-                        };
-                        vs[v] = val;
-                        Ok(())
+                        }
                     },
                     VarValues::Num(n) |
                     VarValues::AstStr(_, Some(n))=> {
-                        let v = validate_list_index(*n, vs.len())?;
-                        vs[v] = val;
-                        Ok(())
+                        validate_list_index(*n, vs.len())?
                     },
                     _ => {
-                        throw_string!("invalid index")
+                        return throw_string!("invalid index");
                     },
-                }
+                };
+                vs[v] = val;
+                Ok(())
             },
             _ => {
                 throw_string!("cannot set index")
@@ -405,6 +403,39 @@ impl VarValues {
 
     fn set_attr(&mut self, _obj: Gc<VarValues>, _index: Gc<VarValues>, _val: Gc<VarValues>) -> LangResult<()> {
         throw_string!("cannot set attr")
+    }
+
+    fn del_index(&mut self, index: Gc<VarValues>) -> LangResult<()> {
+        match self {
+            VarValues::List(vs) => {
+                let v = match &*index.read().unwrap() {
+                    VarValues::Str(s) => {
+                        match string_to_f64(s) {
+                            Some(v) => validate_list_index(v, vs.len())?,
+                            None => {
+                                return throw_string!("invalid index");
+                            }
+                        }
+                    },
+                    VarValues::Num(n) |
+                    VarValues::AstStr(_, Some(n))=> {
+                        validate_list_index(*n, vs.len())?
+                    },
+                    _ => {
+                        return throw_string!("invalid index");
+                    },
+                };
+                vs.remove(v);
+                Ok(())
+            }
+            _ => {
+                throw_string!("cannot del index")
+            }
+        }
+    }
+
+    fn del_attr(&mut self, _index: Gc<VarValues>) -> LangResult<()> {
+        throw_string!("cannot del attr")
     }
 }
 
@@ -622,10 +653,14 @@ impl Context {
                 self.cur_scope.write().unwrap().vars.remove(&name);
             },
             Instruction::DELATTR => {
-
+                let index = self.stack.pop().unwrap();
+                let obj = self.stack.pop().unwrap();
+                obj.write().unwrap().del_attr(index)?;
             },
             Instruction::DELINDEX => {
-
+                let index = self.stack.pop().unwrap();
+                let obj = self.stack.pop().unwrap();
+                obj.write().unwrap().del_index(index)?;
             },
             Instruction::CREATEFUNC(arg_names, loc, size) => {
                 let loc = *loc;
