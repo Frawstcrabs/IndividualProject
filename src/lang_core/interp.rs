@@ -4,7 +4,6 @@ use std::sync::RwLock;
 use std::collections::HashMap;
 use std::fmt;
 use libgc::{Gc as Gc_};
-use nom::character::complete::newline;
 
 pub enum LangError {
     Throw(Gc<VarValues>),
@@ -255,7 +254,7 @@ impl VarValues {
 
     fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
-            VarValues::List(_) => {
+            VarValues::List(vs) => {
                 let name = index.read().unwrap().to_string();
                 match &name[..] {
                     "push" => {
@@ -273,6 +272,32 @@ impl VarValues {
                                 VarValues::RustClosure(Box::new(method))
                             )
                         )
+                    },
+                    "length" => {
+                        Ok(new_value!(VarValues::Num(vs.len() as f64)))
+                    },
+                    _ => {
+                        throw_string!("invalid attr")
+                    }
+                }
+            },
+            VarValues::Str(s) |
+            VarValues::AstStr(s, _) => {
+                let name = index.read().unwrap().to_string();
+                match &name[..] {
+                    "length" => {
+                        Ok(new_value!(VarValues::Num(s.chars().count() as f64)))
+                    },
+                    _ => {
+                        throw_string!("invalid attr")
+                    }
+                }
+            },
+            VarValues::Num(n) => {
+                let name = index.read().unwrap().to_string();
+                match &name[..] {
+                    "length" => {
+                        Ok(new_value!(VarValues::Num(f64_to_string(*n).chars().count() as f64)))
                     },
                     _ => {
                         throw_string!("invalid attr")
