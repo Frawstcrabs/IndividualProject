@@ -6,13 +6,14 @@ use crate::lang_core::interp::{
     Context,
     Gc,
     f64_to_string,
+    SendSyncRefCell
 };
 use crate::builtins::math::val_to_f64;
-use std::sync::RwLock;
+use std::cell::RefCell;
 
 fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
     use VarValues::*;
-    match (&*item1.read().unwrap(), &*item2.read().unwrap()) {
+    match (&*item1.borrow(), &*item2.borrow()) {
         (Nil, Nil) => {
             true
         },
@@ -48,7 +49,7 @@ pub fn not_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
     if args.len() != 1 {
         return throw_string!("<eq:expected 1 arg, got {}>", args.len());
     }
-    let bool_val: bool = (&*args[0].read().unwrap()).into();
+    let bool_val: bool = (&*args[0].borrow()).into();
     return Ok(
         new_value!(
             VarValues::Num(if !bool_val {1.0} else {0.0})

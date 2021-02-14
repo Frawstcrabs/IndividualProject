@@ -6,11 +6,12 @@ use crate::lang_core::interp::{
     Context,
     Gc,
     string_to_f64,
+    SendSyncRefCell
 };
-use std::sync::RwLock;
+use std::cell::RefCell;
 
 pub(crate) fn val_to_f64(val: &Gc<VarValues>, func_name: &str) -> LangResult<f64> {
-    match &*val.read().unwrap() {
+    match &*val.borrow() {
         VarValues::Num(n) |
         VarValues::AstStr(_, Some(n))=> {
             Ok(*n)

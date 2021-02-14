@@ -1,9 +1,10 @@
 use crate::bytecode::Instruction;
 use crate::builtins::register_builtins;
-use std::sync::RwLock;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use libgc::{Gc as Gc_};
+use std::ops::{Deref, DerefMut};
 
 pub enum LangError {
     Throw(Gc<VarValues>),
@@ -22,9 +23,42 @@ pub enum VarValues {
     List(Vec<Gc<VarValues>>),
 }
 
-// TODO: check if this is safe
+// SAFETY: libgc needs these traits but the lib
+// only supports single-threaded applications,
+// so there won't be any concurrency issues
 unsafe impl Send for VarValues {}
 unsafe impl Sync for VarValues {}
+
+// wrapper type so that RefCell can be used within
+// Gc types
+// as of right now, libgc is only single-threaded
+// anyway, and the interpreter only allows single-
+// threading, so there won't be concurrency issues
+#[repr(transparent)]
+pub struct SendSyncRefCell<T>(pub RefCell<T>);
+
+unsafe impl<T> Send for SendSyncRefCell<T> {}
+unsafe impl<T> Sync for SendSyncRefCell<T> {}
+
+impl<T> Deref for SendSyncRefCell<T> {
+    type Target = RefCell<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> DerefMut for SendSyncRefCell<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for SendSyncRefCell<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
 
 pub fn f64_to_string(n: f64) -> String {
     let mut ret = n.to_string();
@@ -65,7 +99,7 @@ impl ToString for VarValues {
                 String::from("<Function>")
             },
             VarValues::CatchResult(_, v) => {
-                v.read().unwrap().to_string()
+                v.borrow().to_string()
             },
             VarValues::List(_) => {
                 String::from("<List>")
@@ -159,7 +193,7 @@ impl fmt::Debug for VarValues {
 
 #[macro_export]
 macro_rules! new_value {
-    ($val:expr) => {Gc::new(RwLock::new($val))};
+    ($val:expr) => {Gc::new(SendSyncRefCell(RefCell::new($val)))};
 }
 
 #[macro_export]
@@ -255,11 +289,11 @@ impl VarValues {
     fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
-                let name = index.read().unwrap().to_string();
+                let name = index.borrow().to_string();
                 match &name[..] {
                     "push" => {
                         let method = move |_ctx: &mut Context, args: Vec<Gc<VarValues>>| {
-                            match &mut *obj.write().unwrap() {
+                            match &mut *obj.borrow_mut() {
                                 VarValues::List(vals) => {
                                     vals.extend(args);
                                     Ok(new_value!(VarValues::Nil))
@@ -283,7 +317,7 @@ impl VarValues {
             },
             VarValues::Str(s) |
             VarValues::AstStr(s, _) => {
-                let name = index.read().unwrap().to_string();
+                let name = index.borrow().to_string();
                 match &name[..] {
                     "length" => {
                         Ok(new_value!(VarValues::Num(s.chars().count() as f64)))
@@ -294,7 +328,7 @@ impl VarValues {
                 }
             },
             VarValues::Num(n) => {
-                let name = index.read().unwrap().to_string();
+                let name = index.borrow().to_string();
                 match &name[..] {
                     "length" => {
                         Ok(new_value!(VarValues::Num(f64_to_string(*n).chars().count() as f64)))
@@ -305,7 +339,7 @@ impl VarValues {
                 }
             },
             VarValues::CatchResult(is_success, v) => {
-                let name = index.read().unwrap().to_string();
+                let name = index.borrow().to_string();
                 match &name[..] {
                     "status" => {
                         Ok(
@@ -331,7 +365,7 @@ impl VarValues {
     fn get_index(&self, _obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
-                let i = match &*index.read().unwrap() {
+                let i = match &*index.borrow() {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -352,7 +386,7 @@ impl VarValues {
             },
             VarValues::Str(s) |
             VarValues::AstStr(s, _) => {
-                let v = match &*index.read().unwrap() {
+                let v = match &*index.borrow() {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => v,
@@ -372,7 +406,7 @@ impl VarValues {
                 index_val_str(s, v)
             },
             VarValues::Num(n) => {
-                let v = match &*index.read().unwrap() {
+                let v = match &*index.borrow() {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => v,
@@ -400,7 +434,7 @@ impl VarValues {
     fn set_index(&mut self, _obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
-                let v = match &*index.read().unwrap() {
+                let v = match &*index.borrow() {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -433,7 +467,7 @@ impl VarValues {
     fn del_index(&mut self, index: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
-                let v = match &*index.read().unwrap() {
+                let v = match &*index.borrow() {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -464,7 +498,7 @@ impl VarValues {
     }
 }
 
-pub type Gc<T> = Gc_<RwLock<T>>;
+pub type Gc<T> = Gc_<SendSyncRefCell<T>>;
 
 #[derive(Debug)]
 pub enum VarRefType {
@@ -505,7 +539,7 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
     let mut values = values
         .into_iter()
         .filter(|v| {
-            match &*v.read().unwrap() {
+            match &*v.borrow() {
                 VarValues::Nil => false,
                 _ => true
             }
@@ -523,7 +557,7 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
         _ => {
             // multiple items, need to convert to strings first
             let strings = values.into_iter()
-                .map(|v| v.read().unwrap().to_string())
+                .map(|v| v.borrow().to_string())
                 .collect::<Vec<_>>();
             let string_len = strings.iter().map(|s| s.len()).sum();
             let mut new_string = String::with_capacity(string_len);
@@ -571,7 +605,7 @@ impl Context {
                 self.stack.push(new_value!(VarValues::Nil));
             },
             Instruction::IFFALSE(i) => {
-                let test: bool = (&*self.stack.pop().unwrap().read().unwrap()).into();
+                let test: bool = (&*self.stack.pop().unwrap().borrow()).into();
                 if !test {
                     *counter = *i;
                     return Ok(());
@@ -593,11 +627,11 @@ impl Context {
             },
             Instruction::SETVAR => {
                 let value = self.stack.pop().unwrap();
-                let name = self.stack.pop().unwrap().read().unwrap().to_string();
+                let name = self.stack.pop().unwrap().borrow().to_string();
                 let mut ns = Gc::clone(&self.cur_scope);
                 loop {
                     let cur_ns = Gc::clone(&ns);
-                    let mut ns_ref = cur_ns.write().unwrap();
+                    let mut ns_ref = cur_ns.borrow_mut();
                     match ns_ref.vars.get_mut(&name) {
                         Some(VarRefType::NonLocal) => match &ns_ref.outer_scope {
                             Some(new_ns) => {
@@ -623,26 +657,26 @@ impl Context {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                obj.write().unwrap().set_attr(obj_clone, index, val)?;
+                obj.borrow_mut().set_attr(obj_clone, index, val)?;
             },
             Instruction::SETINDEX => {
                 let val = self.stack.pop().unwrap();
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                obj.write().unwrap().set_index(obj_clone, index, val)?;
+                obj.borrow_mut().set_index(obj_clone, index, val)?;
             },
             Instruction::SETNONLOCAL => {
-                let name = self.stack.pop().unwrap().read().unwrap().to_string();
-                self.cur_scope.write().unwrap().vars.insert(name, VarRefType::NonLocal);
+                let name = self.stack.pop().unwrap().borrow().to_string();
+                self.cur_scope.borrow_mut().vars.insert(name, VarRefType::NonLocal);
             },
             Instruction::GETVAR => {
-                let name = self.stack.pop().unwrap().read().unwrap().to_string();
+                let name = self.stack.pop().unwrap().borrow().to_string();
                 let mut ns = Gc::clone(&self.cur_scope);
                 let var_value;
                 loop {
                     let cur_ns = Gc::clone(&ns);
-                    let ns_ref = cur_ns.read().unwrap();
+                    let ns_ref = cur_ns.borrow();
                     match ns_ref.vars.get(&name) {
                         Some(VarRefType::Value(v)) => {
                             var_value = Gc::clone(v);
@@ -665,27 +699,27 @@ impl Context {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                self.stack.push(obj.read().unwrap().get_attr(obj_clone, index)?);
+                self.stack.push(obj.borrow().get_attr(obj_clone, index)?);
             },
             Instruction::GETINDEX => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                self.stack.push(obj.read().unwrap().get_index(obj_clone, index)?);
+                self.stack.push(obj.borrow().get_index(obj_clone, index)?);
             },
             Instruction::DELVAR => {
-                let name = self.stack.pop().unwrap().read().unwrap().to_string();
-                self.cur_scope.write().unwrap().vars.remove(&name);
+                let name = self.stack.pop().unwrap().borrow().to_string();
+                self.cur_scope.borrow_mut().vars.remove(&name);
             },
             Instruction::DELATTR => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
-                obj.write().unwrap().del_attr(index)?;
+                obj.borrow_mut().del_attr(index)?;
             },
             Instruction::DELINDEX => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
-                obj.write().unwrap().del_index(index)?;
+                obj.borrow_mut().del_index(index)?;
             },
             Instruction::CREATEFUNC(arg_names, loc, size) => {
                 let loc = *loc;
@@ -702,7 +736,7 @@ impl Context {
                 let arg_size = *arg_size;
                 let args = self.stack.split_off(self.stack.len() - arg_size);
                 let called_var = self.stack.pop().unwrap();
-                called_var.read().unwrap().call(self, args)?;
+                called_var.borrow().call(self, args)?;
             },
             Instruction::CREATELIST(n) => {
                 let vals = self.stack.split_off(self.stack.len() - n);

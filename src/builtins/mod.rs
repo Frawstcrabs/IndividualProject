@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::RwLock;
-use crate::lang_core::interp::{VarValues, Gc, VarRefType};
+use std::cell::RefCell;
+use crate::lang_core::interp::{VarValues, Gc, VarRefType, SendSyncRefCell};
 use crate::new_value;
 
 mod boolean;
