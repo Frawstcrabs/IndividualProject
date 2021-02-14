@@ -53,6 +53,16 @@ struct CompilerCtx {
     in_function: bool,
 }
 
+impl CompilerCtx {
+    fn set_block_args(&mut self, amount: usize) {
+        if let Some(cur_loop) = &mut self.current_loop {
+            if let Some((_, _, n)) = &mut cur_loop.val_counts.last_mut() {
+                *n = amount;
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ASTErrors {
     LoopJumpCutoff,
@@ -61,17 +71,18 @@ enum ASTErrors {
 fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(), ASTErrors> {
     match accessor {
         Accessor::Index(arg) => {
-            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+            ast_vec_bytecode(ctx, arg, ValStatus::Temp, false)?;
             ctx.prog.push(Instruction::GETINDEX);
         },
         Accessor::Attr(arg) => {
-            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+            ast_vec_bytecode(ctx, arg, ValStatus::Temp, false)?;
             ctx.prog.push(Instruction::GETATTR);
         },
         Accessor::Call(args) => {
             for arg in args {
                 ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
             }
+            ctx.set_block_args(1);
             ctx.prog.push(Instruction::CALLFUNC(args.len()));
         },
     }
@@ -83,6 +94,9 @@ fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess) -> Result<(), ASTError
         [AST::String(s, v)] => {
             ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
             ctx.prog.push(Instruction::GETVAR);
+            // have to increment it manually, as ast_vec_bytecode
+            // won't register it in time
+            ctx.set_block_args(1);
         },
         _ => {
             ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
