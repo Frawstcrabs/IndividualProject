@@ -1,3 +1,5 @@
+#![allow(unreachable_patterns)]
+
 use crate::lang_core::parse::{AST, VarAccess, Accessor};
 use std::mem;
 
@@ -149,9 +151,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             prev_jump = ctx.prog.len();
                             ctx.prog.push(Instruction::IFFALSE(0));
                             i += 1;
-                            // if blocks should be returned if a continue or break is
-                            // reached, so they are considered returned values
-                            ast_vec_bytecode(ctx, &args[i], ValStatus::Returned, false);
+                            match ast_vec_bytecode(ctx, &args[i], ValStatus::Returned, false) {
+                                Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                                Err(v) => return Err(v),
+                            }
 
                             let current_len = ctx.prog.len();
                             end_jumps.push(current_len);
@@ -171,7 +174,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             // no else branch given, add a nil for a placeholder
                             ctx.prog.push(Instruction::PUSHNIL);
                         } else {
-                            ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false);
+                            match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false) {
+                                Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                                Err(v) => return Err(v),
+                            }
                         }
                         // correct end jumps to point past all the compiled branches
                         let current_len = ctx.prog.len();
@@ -255,8 +261,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
 
                         let false_jump = ctx.prog.len();
                         ctx.prog.push(Instruction::IFFALSE(0));
-                        // if a continue happens, if bodies can just take it
-                        ast_vec_bytecode(ctx, &args[1], ValStatus::Returned, false);
+                        match ast_vec_bytecode(ctx, &args[1], ValStatus::Returned, false) {
+                            Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                            Err(v) => return Err(v),
+                        }
                         let continue_jump = ctx.prog.len();
                         ctx.prog.push(Instruction::LOOPINCR);
                         ctx.prog.push(Instruction::GOTO(test_start));
@@ -297,22 +305,22 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     },
                     "for" => {
                         assert!(args.len() >= 3 && args.len() <= 5);
-                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true);
+                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true)?;
                         match args.len() {
                             3 => {
                                 ctx.prog.push(Instruction::PUSHNUM(0.0));
-                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true);
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true)?;
                                 ctx.prog.push(Instruction::PUSHNUM(1.0));
                             },
                             4 => {
-                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true);
-                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true);
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true)?;
+                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true)?;
                                 ctx.prog.push(Instruction::PUSHNUM(1.0));
                             },
                             5 => {
-                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true);
-                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true);
-                                ast_vec_bytecode(ctx, &args[3], ValStatus::Temp, true);
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true)?;
+                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true)?;
+                                ast_vec_bytecode(ctx, &args[3], ValStatus::Temp, true)?;
                             },
                             _ => unreachable!(),
                         }
@@ -329,8 +337,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                                 val_counts: Vec::new(),
                             })
                         );
-                        // if a continue happens, if bodies can just take it
-                        ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false);
+                        match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false) {
+                            Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                            Err(v) => return Err(v),
+                        }
                         let continue_jump = ctx.prog.len();
                         ctx.prog.push(Instruction::FORITER);
                         ctx.prog.push(Instruction::LOOPINCR);
