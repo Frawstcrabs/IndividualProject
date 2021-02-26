@@ -666,10 +666,9 @@ impl Context {
             Instruction::DROP(n) => {
                 self.stack.truncate(self.stack.len() - *n);
             },
-            Instruction::SETVAR => {
+            Instruction::SETVAR(name) => {
                 let value = self.stack.pop().unwrap();
-                let name = self.stack.pop().unwrap().borrow().to_string();
-                set_scope_var(name, value, Gc::clone(&self.cur_scope));
+                set_scope_var(name.clone(), value, Gc::clone(&self.cur_scope));
             },
             Instruction::SETATTR => {
                 let val = self.stack.pop().unwrap();
@@ -685,18 +684,16 @@ impl Context {
                 let obj_clone = Gc::clone(&obj);
                 obj.borrow_mut().set_index(obj_clone, index, val)?;
             },
-            Instruction::SETNONLOCAL => {
-                let name = self.stack.pop().unwrap().borrow().to_string();
-                self.cur_scope.borrow_mut().vars.insert(name, VarRefType::NonLocal);
+            Instruction::SETNONLOCAL(name) => {
+                self.cur_scope.borrow_mut().vars.insert(name.clone(), VarRefType::NonLocal);
             },
-            Instruction::GETVAR => {
-                let name = self.stack.pop().unwrap().borrow().to_string();
+            Instruction::GETVAR(name) => {
                 let mut ns = Gc::clone(&self.cur_scope);
                 let var_value;
                 loop {
                     let cur_ns = Gc::clone(&ns);
                     let ns_ref = cur_ns.borrow();
-                    match ns_ref.vars.get(&name) {
+                    match ns_ref.vars.get(name) {
                         Some(VarRefType::Value(v)) => {
                             var_value = Gc::clone(v);
                             break;
@@ -726,9 +723,8 @@ impl Context {
                 let obj_clone = Gc::clone(&obj);
                 self.stack.push(obj.borrow().get_index(obj_clone, index)?);
             },
-            Instruction::DELVAR => {
-                let name = self.stack.pop().unwrap().borrow().to_string();
-                self.cur_scope.borrow_mut().vars.remove(&name);
+            Instruction::DELVAR(name) => {
+                self.cur_scope.borrow_mut().vars.remove(name);
             },
             Instruction::DELATTR => {
                 let index = self.stack.pop().unwrap();
@@ -793,7 +789,7 @@ impl Context {
             },
             Instruction::FORTEST(jump) => {
                 match self.loop_stack.last().unwrap().loop_data {
-                    LoopType::For {value, start, step, end, ..} => {
+                    LoopType::For {value, step, end, ..} => {
                         if step > 0.0 && value >= end {
                             *counter = *jump;
                             return Ok(());

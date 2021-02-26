@@ -14,16 +14,16 @@ pub enum Instruction {
     CREATEFUNC(Vec<String>, usize, usize),
     CALLFUNC(usize),
     CREATELIST(usize),
-    GETVAR,
+    GETVAR(String),
     GETINDEX,
     GETATTR,
-    SETVAR,
+    SETVAR(String),
     SETINDEX,
     SETATTR,
-    DELVAR,
+    DELVAR(String),
     DELINDEX,
     DELATTR,
-    SETNONLOCAL,
+    SETNONLOCAL(String),
     WHILESTART,
     FORSTART,
     FORTEST(usize),
@@ -95,9 +95,8 @@ fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(
 
 fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess) -> Result<(), ASTErrors> {
     match &var.value[..] {
-        [AST::String(s, v)] => {
-            ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
-            ctx.prog.push(Instruction::GETVAR);
+        [AST::String(s, _)] => {
+            ctx.prog.push(Instruction::GETVAR(s.to_owned()));
             // have to increment it manually, as ast_vec_bytecode
             // won't register it in time
             ctx.set_block_args(1);
@@ -206,8 +205,14 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         if !ctx.in_function {
                             panic!("nonlocal only allowed in functions");
                         }
-                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true)?;
-                        ctx.prog.push(Instruction::SETNONLOCAL);
+                        match &args[0][..] {
+                            [AST::String(s, _)] => {
+                                ctx.prog.push(Instruction::SETNONLOCAL(s.to_owned()));
+                            },
+                            _ => {
+                                panic!("cannot set arbitrary expressions as nonlocal");
+                            }
+                        }
                         Ok(false)
                     },
                     "throw" => {
@@ -430,14 +435,12 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
         },
         AST::SetVar(var, val) => {
             match (&var.value[..], &var.accessors[..]) {
-                ([AST::String(s, v)], []) => {
-                    ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
+                ([AST::String(s, _)], []) => {
                     ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
-                    ctx.prog.push(Instruction::SETVAR);
+                    ctx.prog.push(Instruction::SETVAR(s.to_owned()));
                 },
-                ([AST::String(s, v)], _) => {
-                    ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
-                    ctx.prog.push(Instruction::GETVAR);
+                ([AST::String(s, _)], _) => {
+                    ctx.prog.push(Instruction::GETVAR(s.to_owned()));
                     for accessor in &var.accessors[..var.accessors.len()-1] {
                         ast_accessor_bytecode(ctx, accessor)?;
                     }
@@ -459,9 +462,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     }
                 },
                 (_, []) => {
-                    ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
-                    ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
-                    ctx.prog.push(Instruction::SETVAR);
+                    panic!("cannot set arbitrary values");
                 }
                 _ => {
                     ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
@@ -490,13 +491,11 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
         },
         AST::DelVar(var) => {
             match (&var.value[..], &var.accessors[..]) {
-                ([AST::String(s, v)], []) => {
-                    ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
-                    ctx.prog.push(Instruction::DELVAR);
+                ([AST::String(s, _)], []) => {
+                    ctx.prog.push(Instruction::DELVAR(s.to_owned()));
                 },
-                ([AST::String(s, v)], _) => {
-                    ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
-                    ctx.prog.push(Instruction::GETVAR);
+                ([AST::String(s, _)], _) => {
+                    ctx.prog.push(Instruction::GETVAR(s.to_owned()));
                     for accessor in &var.accessors[..var.accessors.len()-1] {
                         ast_accessor_bytecode(ctx, accessor)?;
                     }
