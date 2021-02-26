@@ -544,7 +544,6 @@ pub struct Context {
     pub stack: Vec<Gc<VarValues>>,
     loop_stack: Vec<LoopFrame>,
     cur_scope: Gc<Namespace>,
-    global_scope: Gc<Namespace>,
 }
 
 fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
@@ -617,8 +616,7 @@ impl Context {
         Context {
             stack: Vec::new(),
             loop_stack: Vec::new(),
-            cur_scope: Gc::clone(&global_scope),
-            global_scope,
+            cur_scope: global_scope
         }
     }
     #[inline]
