@@ -24,6 +24,8 @@ macro_rules! add_func {
 
 pub fn register_builtins(vars: &mut HashMap<String, VarRefType>) {
     add_func!(vars, boolean::not_func, "not");
+    add_func!(vars, boolean::and_func, "and");
+    add_func!(vars, boolean::or_func, "or");
     add_func!(vars, boolean::eq_func, "eq");
     add_func!(vars, boolean::ne_func, "ne");
     add_func!(vars, boolean::lt_func, "lt");

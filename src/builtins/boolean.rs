@@ -116,3 +116,29 @@ num_comp_func!(lt_func, "lt", <);
 num_comp_func!(gt_func, "gt", >);
 num_comp_func!(le_func, "le", <=);
 num_comp_func!(ge_func, "ge", >=);
+
+pub fn and_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    if args.len() < 2 {
+        return throw_string!("<and:expected 2+ args, got {}>", args.len());
+    }
+    for arg in &args[..args.len()-2] {
+        let test: bool = (&*arg.borrow()).into();
+        if !test {
+            return Ok(*arg);
+        }
+    }
+    Ok(args[args.len()-1])
+}
+
+pub fn or_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    if args.len() < 2 {
+        return throw_string!("<or:expected 2+ args, got {}>", args.len());
+    }
+    for arg in &args[..args.len()-2] {
+        let test: bool = (&*arg.borrow()).into();
+        if test {
+            return Ok(*arg);
+        }
+    }
+    Ok(args[args.len()-1])
+}
