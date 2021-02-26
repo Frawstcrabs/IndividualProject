@@ -1,5 +1,6 @@
 use crate::bytecode::Instruction;
 use crate::builtins::register_builtins;
+use crate::builtins::math::val_to_f64;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -524,8 +525,20 @@ impl fmt::Debug for Namespace {
     }
 }
 
-enum LoopFrame {
-    While(usize),
+struct LoopFrame {
+    stack_vals: usize,
+    loop_data: LoopType,
+}
+
+enum LoopType {
+    While,
+    For {
+        ident: String,
+        value: f64,
+        start: f64,
+        step: f64,
+        end: f64,
+    },
 }
 
 pub struct Context {
@@ -569,6 +582,31 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
     }
 }
 
+fn set_scope_var(name: String, value: Gc<VarValues>, mut ns: Gc<Namespace>) {
+    loop {
+        let cur_ns = Gc::clone(&ns);
+        let mut ns_ref = cur_ns.borrow_mut();
+        match ns_ref.vars.get_mut(&name) {
+            Some(VarRefType::NonLocal) => match &ns_ref.outer_scope {
+                Some(new_ns) => {
+                    ns = Gc::clone(new_ns);
+                }
+                None => {
+                    panic!("chain of nonlocals reached global scope");
+                }
+            }
+            Some(VarRefType::Value(v)) => {
+                *v = value;
+                break;
+            }
+            None => {
+                ns_ref.vars.insert(name, VarRefType::Value(value));
+                break;
+            }
+        }
+    }
+}
+
 impl Context {
     pub fn new() -> Self {
         let mut global_vars = HashMap::new();
@@ -604,6 +642,9 @@ impl Context {
             Instruction::PUSHNIL => {
                 self.stack.push(new_value!(VarValues::Nil));
             },
+            Instruction::PUSHNUM(n) => {
+                self.stack.push(new_value!(VarValues::Num(*n)));
+            }
             Instruction::IFFALSE(i) => {
                 let test: bool = (&*self.stack.pop().unwrap().borrow()).into();
                 if !test {
@@ -628,29 +669,7 @@ impl Context {
             Instruction::SETVAR => {
                 let value = self.stack.pop().unwrap();
                 let name = self.stack.pop().unwrap().borrow().to_string();
-                let mut ns = Gc::clone(&self.cur_scope);
-                loop {
-                    let cur_ns = Gc::clone(&ns);
-                    let mut ns_ref = cur_ns.borrow_mut();
-                    match ns_ref.vars.get_mut(&name) {
-                        Some(VarRefType::NonLocal) => match &ns_ref.outer_scope {
-                            Some(new_ns) => {
-                                ns = Gc::clone(new_ns);
-                            }
-                            None => {
-                                panic!("no variable reference found");
-                            }
-                        }
-                        Some(VarRefType::Value(v)) => {
-                            *v = value;
-                            break;
-                        }
-                        None => {
-                            ns_ref.vars.insert(name, VarRefType::Value(value));
-                            break;
-                        }
-                    }
-                }
+                set_scope_var(name, value, Gc::clone(&self.cur_scope));
             },
             Instruction::SETATTR => {
                 let val = self.stack.pop().unwrap();
@@ -747,23 +766,63 @@ impl Context {
                 );
             },
             Instruction::WHILESTART => {
-                self.loop_stack.push(LoopFrame::While(0));
+                self.loop_stack.push(LoopFrame {
+                    stack_vals: 0,
+                    loop_data: LoopType::While,
+                });
             },
-            Instruction::WHILEINCR => {
-                match self.loop_stack.last_mut().unwrap() {
-                    LoopFrame::While(counter) => {
-                        *counter += 1;
+            Instruction::FORSTART => {
+                let step = val_to_f64(&self.stack.pop().unwrap(), "for")?;
+                let end = val_to_f64(&self.stack.pop().unwrap(), "for")?;
+                let start = val_to_f64(&self.stack.pop().unwrap(), "for")?;
+                let ident = self.stack.pop().unwrap().borrow().to_string();
+                if step == 0.0 {
+                    return throw_string!("<for:zero-size step>");
+                }
+                set_scope_var(ident.clone(), new_value!(VarValues::Num(start)), Gc::clone(&self.cur_scope));
+                self.loop_stack.push(LoopFrame {
+                    stack_vals: 0,
+                    loop_data: LoopType::For {
+                        ident,
+                        value: start,
+                        start,
+                        step,
+                        end,
                     },
+                });
+            },
+            Instruction::FORTEST(jump) => {
+                match self.loop_stack.last().unwrap().loop_data {
+                    LoopType::For {value, start, step, end, ..} => {
+                        if step > 0.0 && value >= end {
+                            *counter = *jump;
+                            return Ok(());
+                        } else if step < 0.0 && value <= end {
+                            *counter = *jump;
+                            return Ok(());
+                        }
+                    }
                     _ => {
-                        panic!("incorrect loop type on stack");
-                    },
+                        panic!("invalid loop type in FORTEST");
+                    }
                 }
             },
-            Instruction::WHILEEND => {
-                let n = match self.loop_stack.pop().unwrap() {
-                    LoopFrame::While(counter) => counter,
-                    _ => panic!("incorrect loop type on stack")
-                };
+            Instruction::FORITER => {
+                match &mut self.loop_stack.last_mut().unwrap().loop_data {
+                    LoopType::For {ident, value, step, ..} => {
+                        *value += *step;
+                        set_scope_var(ident.clone(), new_value!(VarValues::Num(*value)), Gc::clone(&self.cur_scope));
+                    }
+                    _ => {
+                        panic!("invalid loop type in FORTEST");
+                    }
+                }
+            },
+            Instruction::LOOPINCR => {
+                self.loop_stack.last_mut().unwrap().stack_vals += 1;
+            },
+            Instruction::LOOPEND => {
+                let n = self.loop_stack.pop().unwrap().stack_vals;
                 match n {
                     0 => {
                         self.stack.push(new_value!(VarValues::Nil));
@@ -829,8 +888,8 @@ impl Context {
     pub fn interpret(&mut self, prog: &[Instruction]) -> LangResult<()> {
         let mut counter = 0;
         loop {
-            println!("stack: {:?}", self.stack);
-            println!("instr: {}, {:?}", counter, prog[counter]);
+            //println!("stack: {:?}", self.stack);
+            //println!("instr: {}, {:?}", counter, prog[counter]);
             match &prog[counter] {
                 Instruction::END => {
                     break;

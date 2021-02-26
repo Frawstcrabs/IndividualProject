@@ -4,7 +4,7 @@ use crate::lang_core::interp::{VarValues, Gc, VarRefType, SendSyncRefCell};
 use crate::new_value;
 
 mod boolean;
-mod math;
+pub(crate) mod math;
 
 macro_rules! add_func {
     ($vars:expr, $func:expr, $($names:expr),+) => {

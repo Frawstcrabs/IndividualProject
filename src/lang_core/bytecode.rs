@@ -6,6 +6,7 @@ pub enum Instruction {
     PUSHSTR(String),
     PUSHASTSTR(String, Option<f64>),
     PUSHNIL,
+    PUSHNUM(f64),
     IFFALSE(usize),
     GOTO(usize),
     CONCAT(usize),
@@ -24,8 +25,11 @@ pub enum Instruction {
     DELATTR,
     SETNONLOCAL,
     WHILESTART,
-    WHILEINCR,
-    WHILEEND,
+    FORSTART,
+    FORTEST(usize),
+    FORITER,
+    LOOPINCR,
+    LOOPEND,
     STARTCATCH(usize),
     ENDCATCH,
     THROWVAL,
@@ -249,10 +253,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         // if a continue happens, if bodies can just take it
                         ast_vec_bytecode(ctx, &args[1], ValStatus::Returned, false);
                         let continue_jump = ctx.prog.len();
-                        ctx.prog.push(Instruction::WHILEINCR);
+                        ctx.prog.push(Instruction::LOOPINCR);
                         ctx.prog.push(Instruction::GOTO(test_start));
                         let loop_end = ctx.prog.len();
-                        ctx.prog.push(Instruction::WHILEINCR);
+                        ctx.prog.push(Instruction::LOOPINCR);
                         match &mut ctx.prog[false_jump] {
                             Instruction::IFFALSE(ptr) => {
                                 *ptr = loop_end+1;
@@ -283,9 +287,84 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         } else {
                             panic!("while loop data overwritten inside loop")
                         }
-                        ctx.prog.push(Instruction::WHILEEND);
+                        ctx.prog.push(Instruction::LOOPEND);
                         Ok(true)
                     },
+                    "for" => {
+                        assert!(args.len() >= 3 && args.len() <= 5);
+                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true);
+                        match args.len() {
+                            3 => {
+                                ctx.prog.push(Instruction::PUSHNUM(0.0));
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true);
+                                ctx.prog.push(Instruction::PUSHNUM(1.0));
+                            },
+                            4 => {
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true);
+                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true);
+                                ctx.prog.push(Instruction::PUSHNUM(1.0));
+                            },
+                            5 => {
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true);
+                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true);
+                                ast_vec_bytecode(ctx, &args[3], ValStatus::Temp, true);
+                            },
+                            _ => unreachable!(),
+                        }
+                        ctx.set_block_args(0);
+                        ctx.prog.push(Instruction::FORSTART);
+                        let test_start = ctx.prog.len();
+                        ctx.prog.push(Instruction::FORTEST(0));
+
+                        let outer_loop = mem::replace(
+                            &mut ctx.current_loop,
+                            Some(LoopJumps {
+                                breaks: Vec::new(),
+                                continues: Vec::new(),
+                                val_counts: Vec::new(),
+                            })
+                        );
+                        // if a continue happens, if bodies can just take it
+                        ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false);
+                        let continue_jump = ctx.prog.len();
+                        ctx.prog.push(Instruction::FORITER);
+                        ctx.prog.push(Instruction::LOOPINCR);
+                        ctx.prog.push(Instruction::GOTO(test_start));
+                        let loop_end = ctx.prog.len();
+                        ctx.prog.push(Instruction::LOOPINCR);
+                        match &mut ctx.prog[test_start] {
+                            Instruction::FORTEST(ptr) => {
+                                *ptr = loop_end+1;
+                            },
+                            _ => unreachable!(),
+                        }
+                        let while_data = mem::replace(
+                            &mut ctx.current_loop,
+                            outer_loop
+                        );
+                        if let Some(LoopJumps{breaks, continues, ..}) = while_data {
+                            for index in breaks {
+                                match &mut ctx.prog[index] {
+                                    Instruction::GOTO(ptr) => {
+                                        *ptr = loop_end;
+                                    },
+                                    _ => unreachable!(),
+                                }
+                            }
+                            for index in continues {
+                                match &mut ctx.prog[index] {
+                                    Instruction::GOTO(ptr) => {
+                                        *ptr = continue_jump;
+                                    },
+                                    _ => unreachable!(),
+                                }
+                            }
+                        } else {
+                            panic!("for loop data overwritten inside loop")
+                        }
+                        ctx.prog.push(Instruction::LOOPEND);
+                        Ok(true)
+                    }
                     "continue" => {
                         assert!(args.is_empty());
                         if let Some(LoopJumps{continues, val_counts, ..}) = &mut ctx.current_loop {
