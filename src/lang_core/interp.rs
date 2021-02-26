@@ -535,7 +535,6 @@ enum LoopType {
     For {
         ident: String,
         value: f64,
-        start: f64,
         step: f64,
         end: f64,
     },
@@ -781,7 +780,6 @@ impl Context {
                     loop_data: LoopType::For {
                         ident,
                         value: start,
-                        start,
                         step,
                         end,
                     },
