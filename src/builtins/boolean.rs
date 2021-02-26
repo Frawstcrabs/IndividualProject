@@ -121,7 +121,7 @@ pub fn and_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
     if args.len() < 2 {
         return throw_string!("<and:expected 2+ args, got {}>", args.len());
     }
-    for arg in &args[..args.len()-2] {
+    for arg in &args[..args.len()-1] {
         let test: bool = (&*arg.borrow()).into();
         if !test {
             return Ok(*arg);
@@ -134,7 +134,7 @@ pub fn or_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     if args.len() < 2 {
         return throw_string!("<or:expected 2+ args, got {}>", args.len());
     }
-    for arg in &args[..args.len()-2] {
+    for arg in &args[..args.len()-1] {
         let test: bool = (&*arg.borrow()).into();
         if test {
             return Ok(*arg);
