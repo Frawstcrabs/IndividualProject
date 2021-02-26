@@ -525,7 +525,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     }
                 },
                 (_, []) => {
-                    panic!("invalid {del;} call");
+                    panic!("{}", "invalid {del;} call");
                 }
                 _ => {
                     ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
