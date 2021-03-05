@@ -242,7 +242,7 @@ fn index_val_str(s: &str, index: f64) -> LangResult<Gc<VarValues>> {
 }
 
 impl VarValues {
-    fn call(&self, ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<()> {
+    fn call(&self, ctx: &mut Context, args: Vec<Gc<VarValues>>, outputter: &mut dyn Outputter) -> LangResult<()> {
         match self {
             VarValues::Func(names, inst, outer_scope) => {
                 let mut vars = HashMap::with_capacity(args.len());
@@ -268,18 +268,18 @@ impl VarValues {
                     outer_scope: Some(Gc::clone(&outer_scope)),
                 });
                 ctx.cur_scope = new_ns;
-                ctx.interpret(inst)?;
+                ctx.interpret(inst, outputter)?;
                 ctx.cur_scope = old_scope;
                 Ok(())
             },
             VarValues::RustFunc(f) => {
                 let ret_val = f(ctx, args)?;
-                ctx.stack.push(ret_val);
+                outputter.output_value(ret_val);
                 Ok(())
             },
             VarValues::RustClosure(f) => {
                 let ret_val = f(ctx, args)?;
-                ctx.stack.push(ret_val);
+                outputter.output_value(ret_val);
                 Ok(())
             },
             _ => {
@@ -541,6 +541,37 @@ enum LoopType {
     },
 }
 
+pub trait Outputter {
+    fn output_string(&mut self, s: &str, v: Option<f64>);
+    fn output_value(&mut self, v: Gc<VarValues>);
+}
+
+pub struct StdOutOutput {}
+
+impl Outputter for StdOutOutput {
+    fn output_string(&mut self, s: &str, _: Option<f64>) {
+        print!("{}", s);
+    }
+
+    fn output_value(&mut self, v: Gc<VarValues>) {
+        print!("{}", v.borrow().to_string());
+    }
+}
+
+pub struct CollectOutput {
+    results: Vec<Gc<VarValues>>
+}
+
+impl Outputter for CollectOutput {
+    fn output_string(&mut self, s: &str, v: Option<f64>) {
+        self.results.push(new_value!(VarValues::AstStr(s.to_owned(), v)));
+    }
+
+    fn output_value(&mut self, v: Gc<VarValues>) {
+        self.results.push(Gc::clone(&v));
+    }
+}
+
 pub struct Context {
     pub stack: Vec<Gc<VarValues>>,
     loop_stack: Vec<LoopFrame>,
@@ -621,7 +652,7 @@ impl Context {
         }
     }
     #[inline]
-    fn interpret_inst(&mut self, prog: &[Instruction], counter: &mut usize) -> LangResult<()> {
+    fn interpret_inst(&mut self, prog: &[Instruction], counter: &mut usize, outputter: &mut dyn Outputter) -> LangResult<()> {
         match &prog[*counter] {
             Instruction::PUSHSTR(s) => {
                 self.stack.push(
@@ -642,6 +673,13 @@ impl Context {
             },
             Instruction::PUSHNUM(n) => {
                 self.stack.push(new_value!(VarValues::Num(*n)));
+            }
+            Instruction::OUTPUTSTR(s, v) => {
+                outputter.output_string(s, *v);
+            }
+            Instruction::OUTPUTVAL => {
+                let val = self.stack.pop().unwrap();
+                outputter.output_value(val);
             }
             Instruction::IFFALSE(i) => {
                 let test: bool = (&*self.stack.pop().unwrap().borrow()).into();
@@ -745,11 +783,19 @@ impl Context {
                     ))
                 );
             },
-            Instruction::CALLFUNC(arg_size) => {
+            Instruction::CALLFUNC(arg_size, direct_output) => {
                 let arg_size = *arg_size;
                 let args = self.stack.split_off(self.stack.len() - arg_size);
                 let called_var = self.stack.pop().unwrap();
-                called_var.borrow().call(self, args)?;
+                if *direct_output {
+                    called_var.borrow().call(self, args, outputter)?;
+                } else {
+                    let mut collector = CollectOutput {
+                        results: Vec::new(),
+                    };
+                    called_var.borrow().call(self, args, &mut collector)?;
+                    self.stack.push(concat_vals(collector.results));
+                }
             },
             Instruction::CREATELIST(n) => {
                 let vals = self.stack.split_off(self.stack.len() - n);
@@ -814,25 +860,30 @@ impl Context {
             Instruction::LOOPINCR => {
                 self.loop_stack.last_mut().unwrap().stack_vals += 1;
             },
-            Instruction::LOOPEND => {
-                let n = self.loop_stack.pop().unwrap().stack_vals;
-                match n {
-                    0 => {
-                        self.stack.push(new_value!(VarValues::Nil));
-                    },
-                    1 => {
-                        // no concat necessary
-                    },
-                    _ => {
-                        let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
-                        self.stack.push(concat_val);
-                    },
+            Instruction::LOOPEND(output_val) => {
+                if *output_val {
+                    let n = self.loop_stack.pop().unwrap().stack_vals;
+                    match n {
+                        0 => {
+                            self.stack.push(new_value!(VarValues::Nil));
+                        },
+                        1 => {
+                            // no concat necessary
+                        },
+                        _ => {
+                            let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
+                            self.stack.push(concat_val);
+                        },
+                    }
+                } else {
+                    self.loop_stack.pop();
                 }
             },
             Instruction::STARTCATCH(loc) => {
                 let stack_size = self.stack.len();
+                let loop_stack_size = self.loop_stack.len();
                 *counter += 1;
-                match self.catch_block(prog, counter) {
+                match self.catch_block(prog, outputter, counter) {
                     Ok(_) => {
                         let top_val = self.stack.pop().unwrap();
                         self.stack.push(
@@ -843,6 +894,7 @@ impl Context {
                     },
                     Err(LangError::Throw(err_val)) => {
                         self.stack.truncate(stack_size);
+                        self.loop_stack.truncate(loop_stack_size);
                         self.stack.push(
                             new_value!(
                                 VarValues::CatchResult(false, err_val)
@@ -872,10 +924,10 @@ impl Context {
         *counter += 1;
         Ok(())
     }
-    fn catch_block(&mut self, prog: &[Instruction], counter: &mut usize) -> LangResult<()> {
+    fn catch_block(&mut self, prog: &[Instruction], outputter: &mut dyn Outputter, counter: &mut usize) -> LangResult<()> {
         loop {
-            println!("stack: {:?}", self.stack);
-            println!("instr: {}, {:?}", *counter, prog[*counter]);
+            //println!("stack: {:?}", self.stack);
+            //println!("instr: {}, {:?}", *counter, prog[*counter]);
             match &prog[*counter] {
                 Instruction::ENDCATCH => {
                     break;
@@ -884,7 +936,7 @@ impl Context {
                     panic!("found end inside of catch block")
                 }
                 _ => {
-                    match self.interpret_inst(prog, counter) {
+                    match self.interpret_inst(prog, counter, outputter) {
                         Ok(()) => {}
                         Err(LangError::Throw(v)) => return Err(LangError::Throw(v)),
                         Err(LangError::CatchUnwind(0)) => return Err(LangError::CatchUnwind(0)),
@@ -895,11 +947,11 @@ impl Context {
         }
         Ok(())
     }
-    pub fn interpret(&mut self, prog: &[Instruction]) -> LangResult<()> {
+    pub fn interpret(&mut self, prog: &[Instruction], outputter: &mut dyn Outputter) -> LangResult<()> {
         let mut counter = 0;
         loop {
-            println!("stack: {:?}", self.stack);
-            println!("instr: {}, {:?}", counter, prog[counter]);
+            //println!("stack: {:?}", self.stack);
+            //println!("instr: {}, {:?}", counter, prog[counter]);
             match &prog[counter] {
                 Instruction::END => {
                     break;
@@ -908,7 +960,7 @@ impl Context {
                     panic!("found endcatch outside of catch block");
                 },
                 _ => {
-                    match self.interpret_inst(prog, &mut counter) {
+                    match self.interpret_inst(prog, &mut counter, outputter) {
                         Ok(()) => {}
                         Err(LangError::Throw(v)) => return Err(LangError::Throw(v)),
                         Err(LangError::CatchUnwind(_)) => {

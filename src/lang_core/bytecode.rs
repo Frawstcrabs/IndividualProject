@@ -9,12 +9,14 @@ pub enum Instruction {
     PUSHASTSTR(String, Option<f64>),
     PUSHNIL,
     PUSHNUM(f64),
+    OUTPUTSTR(String, Option<f64>),
+    OUTPUTVAL,
     IFFALSE(usize),
     GOTO(usize),
     CONCAT(usize),
     DROP(usize),
     CREATEFUNC(Vec<String>, usize, usize),
-    CALLFUNC(usize),
+    CALLFUNC(usize, bool),
     CREATELIST(usize),
     GETVAR(String),
     GETINDEX,
@@ -31,7 +33,7 @@ pub enum Instruction {
     FORTEST(usize),
     FORITER,
     LOOPINCR,
-    LOOPEND,
+    LOOPEND(bool),
     STARTCATCH(usize),
     ENDCATCH,
     UNWINDCATCH(usize),
@@ -89,28 +91,28 @@ enum ASTErrors {
     LoopJumpCutoff,
 }
 
-fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(), ASTErrors> {
+fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor, direct_output: bool) -> Result<(), ASTErrors> {
     match accessor {
         Accessor::Index(arg) => {
-            ast_vec_bytecode(ctx, arg, ValStatus::Temp, false)?;
+            ast_vec_bytecode(ctx, arg, ValStatus::Temp, false, false)?;
             ctx.prog.push(Instruction::GETINDEX);
         },
         Accessor::Attr(arg) => {
-            ast_vec_bytecode(ctx, arg, ValStatus::Temp, false)?;
+            ast_vec_bytecode(ctx, arg, ValStatus::Temp, false, false)?;
             ctx.prog.push(Instruction::GETATTR);
         },
         Accessor::Call(args) => {
             for arg in args {
-                ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+                ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
             }
             ctx.set_block_args(1);
-            ctx.prog.push(Instruction::CALLFUNC(args.len()));
+            ctx.prog.push(Instruction::CALLFUNC(args.len(), direct_output));
         },
     }
     Ok(())
 }
 
-fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess) -> Result<(), ASTErrors> {
+fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess, direct_output: bool) -> Result<(), ASTErrors> {
     match &var.value[..] {
         [AST::String(s, _)] => {
             ctx.prog.push(Instruction::GETVAR(s.to_owned()));
@@ -119,11 +121,18 @@ fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess) -> Result<(), ASTError
             ctx.set_block_args(1);
         },
         _ => {
-            ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
+            ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
         },
     }
     for accessor in &var.accessors {
-        ast_accessor_bytecode(ctx, accessor)?;
+        ast_accessor_bytecode(ctx, accessor, direct_output)?;
+    }
+    // accessors ending with a function call and that use direct output do not
+    // use outputval, as they handle the outputting themselves
+    match (&var.accessors.last(), direct_output) {
+        (Some(Accessor::Call(_)), true) => {},
+        (_, true) => ctx.prog.push(Instruction::OUTPUTVAL),
+        _ => {}
     }
     Ok(())
 }
@@ -146,11 +155,14 @@ fn count_stack_vals(counts: &Vec<(ValStatus, usize, usize)>) -> (usize, usize) {
         })
 }
 
-fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
+fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result<bool, ASTErrors> {
     //println!("ast_bytecode\n  {:?}\n  {:?}", ast, ctx.current_loop);
     match ast {
         AST::String(s, v) => {
-            ctx.prog.push(Instruction::PUSHASTSTR(s.to_owned(), *v));
+            ctx.prog.push(match direct_output {
+                true => Instruction::OUTPUTSTR(s.to_owned(), *v),
+                false => Instruction::PUSHASTSTR(s.to_owned(), *v),
+            });
             Ok(true)
         },
         AST::Variable(var) => {
@@ -162,11 +174,11 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         let mut end_jumps = Vec::new();
                         let mut prev_jump: usize;
                         while i < args.len() - 1 {
-                            ast_vec_bytecode(ctx, &args[i], ValStatus::Temp, false)?;
+                            ast_vec_bytecode(ctx, &args[i], ValStatus::Temp, false, false)?;
                             prev_jump = ctx.prog.len();
                             ctx.prog.push(Instruction::IFFALSE(0));
                             i += 1;
-                            match ast_vec_bytecode(ctx, &args[i], ValStatus::Returned, false) {
+                            match ast_vec_bytecode(ctx, &args[i], ValStatus::Returned, false, direct_output) {
                                 Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
                                 Err(v) => return Err(v),
                             }
@@ -189,7 +201,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             // no else branch given, add a nil for a placeholder
                             ctx.prog.push(Instruction::PUSHNIL);
                         } else {
-                            match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false) {
+                            match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false, direct_output) {
                                 Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
                                 Err(v) => return Err(v),
                             }
@@ -212,13 +224,19 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         // must be literal strings and not variable/function calls
                         // last arg is the function body
                         ast_compile_function(ctx, args);
+                        if direct_output {
+                            ctx.prog.push(Instruction::OUTPUTVAL);
+                        }
                         Ok(true)
                     },
                     "list" => {
                         for v in args {
-                            ast_vec_bytecode(ctx, v, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, v, ValStatus::Temp, true, false)?;
                         }
                         ctx.prog.push(Instruction::CREATELIST(args.len()));
+                        if direct_output {
+                            ctx.prog.push(Instruction::OUTPUTVAL);
+                        }
                         Ok(true)
                     },
                     "nonlocal" => {
@@ -238,7 +256,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     },
                     "throw" => {
                         assert!(args.len() == 1);
-                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true)?;
+                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true, false)?;
                         ctx.prog.push(Instruction::THROWVAL);
                         Ok(false)
                     },
@@ -247,7 +265,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         let startcatch_index = ctx.prog.len();
                         ctx.prog.push(Instruction::STARTCATCH(0));
                         ctx.inc_catch_count();
-                        match ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true) {
+                        match ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true, false) {
                             Ok(_) => {
                                 ctx.dec_catch_count();
                             }
@@ -264,6 +282,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             }
                             _ => unreachable!()
                         }
+                        if direct_output {
+                            ctx.prog.push(Instruction::OUTPUTVAL);
+                        }
                         Ok(true)
                     },
                     "while" => {
@@ -272,7 +293,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         let test_start = ctx.prog.len();
                         // this value is technically outside of the while body, so
                         // it should use the outside loop's continue or break if found
-                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, false)?;
+                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, false, false)?;
 
                         let outer_loop = mem::replace(
                             &mut ctx.current_loop,
@@ -286,7 +307,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
 
                         let false_jump = ctx.prog.len();
                         ctx.prog.push(Instruction::IFFALSE(0));
-                        match ast_vec_bytecode(ctx, &args[1], ValStatus::Returned, false) {
+                        match ast_vec_bytecode(ctx, &args[1], ValStatus::Returned, false, direct_output) {
                             Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
                             Err(v) => return Err(v),
                         }
@@ -325,27 +346,27 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         } else {
                             panic!("while loop data overwritten inside loop")
                         }
-                        ctx.prog.push(Instruction::LOOPEND);
+                        ctx.prog.push(Instruction::LOOPEND(!direct_output));
                         Ok(true)
                     },
                     "for" => {
                         assert!(args.len() >= 3 && args.len() <= 5);
-                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true)?;
+                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true, false)?;
                         match args.len() {
                             3 => {
                                 ctx.prog.push(Instruction::PUSHNUM(0.0));
-                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true)?;
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true, false)?;
                                 ctx.prog.push(Instruction::PUSHNUM(1.0));
                             },
                             4 => {
-                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true)?;
-                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true)?;
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true, false)?;
+                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true, false)?;
                                 ctx.prog.push(Instruction::PUSHNUM(1.0));
                             },
                             5 => {
-                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true)?;
-                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true)?;
-                                ast_vec_bytecode(ctx, &args[3], ValStatus::Temp, true)?;
+                                ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true, false)?;
+                                ast_vec_bytecode(ctx, &args[2], ValStatus::Temp, true, false)?;
+                                ast_vec_bytecode(ctx, &args[3], ValStatus::Temp, true, false)?;
                             },
                             _ => unreachable!(),
                         }
@@ -363,7 +384,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                                 val_counts: Vec::new(),
                             })
                         );
-                        match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false) {
+                        match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false, direct_output) {
                             Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
                             Err(v) => return Err(v),
                         }
@@ -403,7 +424,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         } else {
                             panic!("for loop data overwritten inside loop")
                         }
-                        ctx.prog.push(Instruction::LOOPEND);
+                        ctx.prog.push(Instruction::LOOPEND(!direct_output));
                         Ok(true)
                     }
                     "continue" => {
@@ -414,15 +435,15 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             if temp_vals > 0 {
                                 ctx.prog.push(Instruction::DROP(temp_vals));
                             }
-                            match ret_vals {
-                                0 => {
-                                    ctx.prog.push(Instruction::PUSHNIL);
-                                },
-                                1 => {
-
-                                },
-                                _ => {
-                                    ctx.prog.push(Instruction::CONCAT(ret_vals));
+                            if !direct_output {
+                                match ret_vals {
+                                    0 => {
+                                        ctx.prog.push(Instruction::PUSHNIL);
+                                    },
+                                    1 => {},
+                                    _ => {
+                                        ctx.prog.push(Instruction::CONCAT(ret_vals));
+                                    }
                                 }
                             }
                             if *catch_count > 0 {
@@ -443,15 +464,15 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             if temp_vals > 0 {
                                 ctx.prog.push(Instruction::DROP(temp_vals));
                             }
-                            match ret_vals {
-                                0 => {
-                                    ctx.prog.push(Instruction::PUSHNIL);
-                                },
-                                1 => {
-
-                                },
-                                _ => {
-                                    ctx.prog.push(Instruction::CONCAT(ret_vals));
+                            if !direct_output {
+                                match ret_vals {
+                                    0 => {
+                                        ctx.prog.push(Instruction::PUSHNIL);
+                                    },
+                                    1 => {},
+                                    _ => {
+                                        ctx.prog.push(Instruction::CONCAT(ret_vals));
+                                    }
                                 }
                             }
                             if *catch_count > 0 {
@@ -465,12 +486,12 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         }
                     },
                     _ => {
-                        ast_var_access(ctx, var)?;
+                        ast_var_access(ctx, var, direct_output)?;
                         Ok(true)
                     },
                 },
                 _ => {
-                    ast_var_access(ctx, var)?;
+                    ast_var_access(ctx, var, direct_output)?;
                     Ok(true)
                 }
             }
@@ -478,24 +499,24 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
         AST::SetVar(var, val) => {
             match (&var.value[..], &var.accessors[..]) {
                 ([AST::String(s, _)], []) => {
-                    ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
+                    ast_vec_bytecode(ctx, val, ValStatus::Temp, true, false)?;
                     ctx.prog.push(Instruction::SETVAR(s.to_owned()));
                 },
                 ([AST::String(s, _)], _) => {
                     ctx.prog.push(Instruction::GETVAR(s.to_owned()));
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor)?;
+                        ast_accessor_bytecode(ctx, accessor, false)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
                         Accessor::Index(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
-                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
+                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::SETINDEX);
                         },
                         Accessor::Attr(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
-                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
+                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::SETATTR);
                         },
                         Accessor::Call(_) => {
@@ -507,20 +528,20 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     panic!("cannot set arbitrary values");
                 }
                 _ => {
-                    ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
+                    ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor)?;
+                        ast_accessor_bytecode(ctx, accessor, false)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
                         Accessor::Index(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
-                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
+                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::SETINDEX);
                         },
                         Accessor::Attr(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
-                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
+                            ast_vec_bytecode(ctx, val, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::SETATTR);
                         },
                         Accessor::Call(_) => {
@@ -539,16 +560,16 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                 ([AST::String(s, _)], _) => {
                     ctx.prog.push(Instruction::GETVAR(s.to_owned()));
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor)?;
+                        ast_accessor_bytecode(ctx, accessor, false)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
                         Accessor::Index(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::DELINDEX);
                         },
                         Accessor::Attr(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::DELATTR);
                         },
                         Accessor::Call(_) => {
@@ -560,18 +581,18 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     panic!("{}", "invalid {del;} call");
                 }
                 _ => {
-                    ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true)?;
+                    ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor)?;
+                        ast_accessor_bytecode(ctx, accessor, false)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
                         Accessor::Index(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::DELINDEX);
                         },
                         Accessor::Attr(arg) => {
-                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true)?;
+                            ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
                             ctx.prog.push(Instruction::DELATTR);
                         },
                         Accessor::Call(_) => {
@@ -604,7 +625,7 @@ fn ast_compile_function(ctx: &mut CompilerCtx, args: &[Vec<AST>]) {
         current_loop: None,
         in_function: true,
     };
-    ast_vec_bytecode(&mut func_ctx, &args[args.len() - 1], ValStatus::Returned, true)
+    ast_vec_bytecode(&mut func_ctx, &args[args.len() - 1], ValStatus::Returned, true, true)
         .expect("ASTError leaked outside of compiler");
     func_ctx.prog.push(Instruction::END);
     ast_link_functions(&mut func_ctx);
@@ -628,7 +649,11 @@ fn ast_link_functions(ctx: &mut CompilerCtx) {
     }
 }
 
-fn ast_vec_bytecode(ctx: &mut CompilerCtx, astlist: &[AST], status: ValStatus, add_temp: bool) -> Result<(), ASTErrors> {
+fn ast_vec_bytecode(ctx: &mut CompilerCtx,
+                    astlist: &[AST],
+                    status: ValStatus,
+                    add_temp: bool,
+                    direct_output: bool) -> Result<(), ASTErrors> {
     //println!("ast_vec_bytecode\n  {:?}\n  {:?}", astlist, ctx.current_loop);
     if let Some(cur_loop) = &mut ctx.current_loop {
         match cur_loop.val_counts.last() {
@@ -641,7 +666,7 @@ fn ast_vec_bytecode(ctx: &mut CompilerCtx, astlist: &[AST], status: ValStatus, a
             }
         }
         for ast in astlist {
-            match ast_bytecode(ctx, ast) {
+            match ast_bytecode(ctx, ast, direct_output) {
                 Ok(true) => {
                     let mut stack_entry = ctx.current_loop.as_mut().unwrap().val_counts.last_mut().unwrap();
                     stack_entry.1 += 1;
@@ -657,18 +682,20 @@ fn ast_vec_bytecode(ctx: &mut CompilerCtx, astlist: &[AST], status: ValStatus, a
                 }
             }
         }
-        match ctx.current_loop.as_mut().unwrap().val_counts.pop().unwrap().1 {
-            0 => {
-                // push dummy value
-                ctx.prog.push(Instruction::PUSHNIL);
-            },
-            1 => {
-                // single item remaining already
-            },
-            n => {
-                // concat values to a single item
-                ctx.prog.push(Instruction::CONCAT(n));
-            },
+        if !direct_output {
+            match ctx.current_loop.as_mut().unwrap().val_counts.pop().unwrap().1 {
+                0 => {
+                    // push dummy value
+                    ctx.prog.push(Instruction::PUSHNIL);
+                },
+                1 => {
+                    // single item remaining already
+                },
+                n => {
+                    // concat values to a single item
+                    ctx.prog.push(Instruction::CONCAT(n));
+                },
+            }
         }
         if add_temp {
             ctx.current_loop.as_mut().unwrap().val_counts.last_mut().unwrap().2 += 1;
@@ -676,7 +703,7 @@ fn ast_vec_bytecode(ctx: &mut CompilerCtx, astlist: &[AST], status: ValStatus, a
     } else {
         let mut stack_vals = 0;
         for ast in astlist {
-            match ast_bytecode(ctx, ast) {
+            match ast_bytecode(ctx, ast, direct_output) {
                 Ok(true) => {
                     stack_vals += 1;
                 }
@@ -686,18 +713,20 @@ fn ast_vec_bytecode(ctx: &mut CompilerCtx, astlist: &[AST], status: ValStatus, a
                 }
             }
         }
-        match stack_vals {
-            0 => {
-                // push dummy value
-                ctx.prog.push(Instruction::PUSHNIL);
-            },
-            1 => {
-                // single item remaining already
-            },
-            n => {
-                // concat values to a single item
-                ctx.prog.push(Instruction::CONCAT(n));
-            },
+        if !direct_output {
+            match stack_vals {
+                0 => {
+                    // push dummy value
+                    ctx.prog.push(Instruction::PUSHNIL);
+                },
+                1 => {
+                    // single item remaining already
+                },
+                n => {
+                    // concat values to a single item
+                    ctx.prog.push(Instruction::CONCAT(n));
+                },
+            }
         }
     }
     //println!("ast_vec_bytecode finished, {:?}", ctx.current_loop);
@@ -711,7 +740,7 @@ pub fn generate_bytecode(ast: &[AST]) -> Vec<Instruction> {
         current_loop: None,
         in_function: false,
     };
-    ast_vec_bytecode(&mut ctx, ast, ValStatus::Returned, true)
+    ast_vec_bytecode(&mut ctx, ast, ValStatus::Returned, true, true)
         .expect("ASTError leaked outside of compiler");
     ctx.prog.push(Instruction::END);
     ast_link_functions(&mut ctx);
