@@ -9,6 +9,7 @@ use std::ops::{Deref, DerefMut};
 
 pub enum LangError {
     Throw(Gc<VarValues>),
+    CatchUnwind(usize),
 }
 pub(crate) type LangResult<T> = Result<T, LangError>;
 
@@ -849,9 +850,19 @@ impl Context {
                         );
                         *counter = *loc;
                         return Ok(());
+                    },
+                    Err(LangError::CatchUnwind(0)) => {
+                        // unwind hit floor, no value is created, continue as normal
+                    },
+                    Err(LangError::CatchUnwind(n)) => {
+                        // pass it along, catch_block() and interpret() handle this
+                        return Err(LangError::CatchUnwind(n-1));
                     }
                 }
             },
+            Instruction::UNWINDCATCH(n) => {
+                return Err(LangError::CatchUnwind(*n));
+            }
             Instruction::THROWVAL => {
                 let v = self.stack.pop().unwrap();
                 return Err(LangError::Throw(v));
@@ -872,7 +883,14 @@ impl Context {
                 Instruction::END => {
                     panic!("found end inside of catch block")
                 }
-                _ => self.interpret_inst(prog, counter)?
+                _ => {
+                    match self.interpret_inst(prog, counter) {
+                        Ok(()) => {}
+                        Err(LangError::Throw(v)) => return Err(LangError::Throw(v)),
+                        Err(LangError::CatchUnwind(0)) => return Err(LangError::CatchUnwind(0)),
+                        Err(LangError::CatchUnwind(n)) => return Err(LangError::CatchUnwind(n-1)),
+                    }
+                }
             }
         }
         Ok(())
@@ -880,8 +898,8 @@ impl Context {
     pub fn interpret(&mut self, prog: &[Instruction]) -> LangResult<()> {
         let mut counter = 0;
         loop {
-            //println!("stack: {:?}", self.stack);
-            //println!("instr: {}, {:?}", counter, prog[counter]);
+            println!("stack: {:?}", self.stack);
+            println!("instr: {}, {:?}", counter, prog[counter]);
             match &prog[counter] {
                 Instruction::END => {
                     break;
@@ -889,7 +907,16 @@ impl Context {
                 Instruction::ENDCATCH => {
                     panic!("found endcatch outside of catch block");
                 },
-                _ => self.interpret_inst(prog, &mut counter)?
+                _ => {
+                    match self.interpret_inst(prog, &mut counter) {
+                        Ok(()) => {}
+                        Err(LangError::Throw(v)) => return Err(LangError::Throw(v)),
+                        Err(LangError::CatchUnwind(_)) => {
+                            // catch unwind is trying to unwind more catches than exist
+                            panic!("catchunwind escaped outermost catch block");
+                        },
+                    }
+                }
             }
         }
         Ok(())

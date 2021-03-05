@@ -34,6 +34,7 @@ pub enum Instruction {
     LOOPEND,
     STARTCATCH(usize),
     ENDCATCH,
+    UNWINDCATCH(usize),
     THROWVAL,
     END,
 }
@@ -48,6 +49,7 @@ enum ValStatus {
 struct LoopJumps {
     breaks: Vec<usize>,
     continues: Vec<usize>,
+    catch_count: usize,
     val_counts: Vec<(ValStatus, usize, usize)>,
 }
 
@@ -60,11 +62,24 @@ struct CompilerCtx {
 }
 
 impl CompilerCtx {
+    #[inline]
     fn set_block_args(&mut self, amount: usize) {
         if let Some(cur_loop) = &mut self.current_loop {
             if let Some((_, _, n)) = &mut cur_loop.val_counts.last_mut() {
                 *n = amount;
             }
+        }
+    }
+    #[inline]
+    fn inc_catch_count(&mut self) {
+        if let Some(cur_loop) = &mut self.current_loop {
+            cur_loop.catch_count += 1;
+        }
+    }
+    #[inline]
+    fn dec_catch_count(&mut self) {
+        if let Some(cur_loop) = &mut self.current_loop {
+            cur_loop.catch_count -= 1;
         }
     }
 }
@@ -231,7 +246,16 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                         assert!(args.len() == 1);
                         let startcatch_index = ctx.prog.len();
                         ctx.prog.push(Instruction::STARTCATCH(0));
-                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true)?;
+                        ctx.inc_catch_count();
+                        match ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true) {
+                            Ok(_) => {
+                                ctx.dec_catch_count();
+                            }
+                            Err(v) => {
+                                ctx.dec_catch_count();
+                                return Err(v);
+                            }
+                        }
                         ctx.prog.push(Instruction::ENDCATCH);
                         let current_len = ctx.prog.len();
                         match &mut ctx.prog[startcatch_index] {
@@ -255,6 +279,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             Some(LoopJumps {
                                 breaks: Vec::new(),
                                 continues: Vec::new(),
+                                catch_count: 0,
                                 val_counts: Vec::new(),
                             })
                         );
@@ -334,6 +359,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                             Some(LoopJumps {
                                 breaks: Vec::new(),
                                 continues: Vec::new(),
+                                catch_count: 0,
                                 val_counts: Vec::new(),
                             })
                         );
@@ -382,7 +408,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     }
                     "continue" => {
                         assert!(args.is_empty());
-                        if let Some(LoopJumps{continues, val_counts, ..}) = &mut ctx.current_loop {
+                        if let Some(LoopJumps{continues, val_counts, catch_count, ..}) = &mut ctx.current_loop {
                             let (temp_vals, ret_vals) = count_stack_vals(val_counts);
                             println!("continue, {:?}, ({:?}, {:?})", val_counts, temp_vals, ret_vals);
                             if temp_vals > 0 {
@@ -399,6 +425,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                                     ctx.prog.push(Instruction::CONCAT(ret_vals));
                                 }
                             }
+                            if *catch_count > 0 {
+                                ctx.prog.push(Instruction::UNWINDCATCH(*catch_count));
+                            }
                             continues.push(ctx.prog.len());
                             ctx.prog.push(Instruction::GOTO(0));
                             Err(ASTErrors::LoopJumpCutoff)
@@ -408,7 +437,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                     },
                     "break" => {
                         assert!(args.is_empty());
-                        if let Some(LoopJumps{breaks, val_counts, ..}) = &mut ctx.current_loop {
+                        if let Some(LoopJumps{breaks, val_counts, catch_count, ..}) = &mut ctx.current_loop {
                             let (temp_vals, ret_vals) = count_stack_vals(val_counts);
                             println!("break, {:?}, ({:?}, {:?})", val_counts, temp_vals, ret_vals);
                             if temp_vals > 0 {
@@ -424,6 +453,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST) -> Result<bool, ASTErrors> {
                                 _ => {
                                     ctx.prog.push(Instruction::CONCAT(ret_vals));
                                 }
+                            }
+                            if *catch_count > 0 {
+                                ctx.prog.push(Instruction::UNWINDCATCH(*catch_count));
                             }
                             breaks.push(ctx.prog.len());
                             ctx.prog.push(Instruction::GOTO(0));
