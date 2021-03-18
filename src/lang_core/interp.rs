@@ -651,6 +651,25 @@ impl Context {
             cur_scope: global_scope
         }
     }
+    pub fn with_args(args: Vec<String>) -> Self {
+        let mut global_vars = HashMap::new();
+        register_builtins(&mut global_vars);
+        let args_var = new_value!(VarValues::List(
+            args.into_iter()
+                .map(|s| new_value!(VarValues::Str(s)))
+                .collect()
+        ));
+        global_vars.insert(String::from("args"), VarRefType::Value(args_var));
+        let global_scope = new_value!(Namespace {
+            vars: global_vars,
+            outer_scope: None,
+        });
+        Context {
+            stack: Vec::new(),
+            loop_stack: Vec::new(),
+            cur_scope: global_scope
+        }
+    }
     #[inline]
     fn interpret_inst(&mut self, prog: &[Instruction], counter: &mut usize, outputter: &mut dyn Outputter) -> LangResult<()> {
         match &prog[*counter] {
