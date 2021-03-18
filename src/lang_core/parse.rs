@@ -407,7 +407,7 @@ fn parse_base(input: &str) -> IResult<&str, Vec<AST>> {
 fn parse_oneline(input: String) -> Result<String, ()> {
     fn check_oneline(inp: &str) -> IResult<&str, &str> {
         let (input, _) = multispace0(inp)?;
-        tag("{!>oneline}")(input)
+        tag("{#>oneline}")(input)
     }
 
     if let Ok((input, _)) = check_oneline(&input) {
@@ -434,8 +434,8 @@ fn parse_oneline(input: String) -> Result<String, ()> {
 }
 
 pub fn run_parser(input: &str) -> Result<Vec<AST>, ()> {
-    let input = parse_oneline(input.to_owned())?;
-    let input = remove_comments(&input)?;
+    let input = remove_comments(input)?;
+    let input = parse_oneline(input)?;
     match parse_base(&input) {
         Ok((rem, ast)) => {
             if rem.len() == 0 {
