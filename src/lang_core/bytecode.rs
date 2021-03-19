@@ -91,7 +91,7 @@ enum ASTErrors {
     LoopJumpCutoff,
 }
 
-fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor, direct_output: bool) -> Result<(), ASTErrors> {
+fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(), ASTErrors> {
     match accessor {
         Accessor::Index(arg) => {
             ast_vec_bytecode(ctx, arg, ValStatus::Temp, false, false)?;
@@ -106,7 +106,7 @@ fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor, direct_outp
                 ast_vec_bytecode(ctx, arg, ValStatus::Temp, true, false)?;
             }
             ctx.set_block_args(1);
-            ctx.prog.push(Instruction::CALLFUNC(args.len(), direct_output));
+            ctx.prog.push(Instruction::CALLFUNC(args.len(), false));
         },
     }
     Ok(())
@@ -125,13 +125,17 @@ fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess, direct_output: bool) -
         },
     }
     for accessor in &var.accessors {
-        ast_accessor_bytecode(ctx, accessor, direct_output)?;
+        ast_accessor_bytecode(ctx, accessor)?;
     }
-    // accessors ending with a function call and that use direct output do not
-    // use outputval, as they handle the outputting themselves
-    match (&var.accessors.last(), direct_output) {
-        (Some(Accessor::Call(_)), true) => {},
-        (_, true) => ctx.prog.push(Instruction::OUTPUTVAL),
+    match (ctx.prog.last_mut(), direct_output) {
+        (Some(Instruction::CALLFUNC(_, output)), true) => {
+            // CALLFUNC with direct output enabled automatically outputs its vals,
+            // so no OUTPUTVAL instruction is needed
+            *output = true;
+        }
+        (_, true) => {
+            ctx.prog.push(Instruction::OUTPUTVAL)
+        }
         _ => {}
     }
     Ok(())
@@ -505,7 +509,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                 ([AST::String(s, _)], _) => {
                     ctx.prog.push(Instruction::GETVAR(s.to_owned()));
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor, false)?;
+                        ast_accessor_bytecode(ctx, accessor)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
@@ -530,7 +534,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                 _ => {
                     ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor, false)?;
+                        ast_accessor_bytecode(ctx, accessor)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
@@ -560,7 +564,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                 ([AST::String(s, _)], _) => {
                     ctx.prog.push(Instruction::GETVAR(s.to_owned()));
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor, false)?;
+                        ast_accessor_bytecode(ctx, accessor)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
@@ -583,7 +587,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                 _ => {
                     ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
                     for accessor in &var.accessors[..var.accessors.len()-1] {
-                        ast_accessor_bytecode(ctx, accessor, false)?;
+                        ast_accessor_bytecode(ctx, accessor)?;
                     }
                     let accessor = var.accessors.last().unwrap();
                     match accessor {
