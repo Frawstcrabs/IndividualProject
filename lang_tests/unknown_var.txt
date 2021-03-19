@@ -1,0 +1,7 @@
+{!
+  Run-time:
+    stdout: test <a:unknown var>
+!}
+
+{#>oneline}
+test {a} test

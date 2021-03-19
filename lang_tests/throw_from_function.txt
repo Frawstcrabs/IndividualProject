@@ -1,0 +1,14 @@
+{!
+  Run-time:
+    stdout: 0caught
+!}
+
+{#>oneline}
+{func:{error;}:
+    test
+    {throw:caught;}
+    ignored
+;}
+{set:caught:{catch:{error;};};}
+{caught.status}
+{caught.value}

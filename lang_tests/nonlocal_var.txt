@@ -1,0 +1,20 @@
+{!
+  Run-time:
+    stdout: abcadd
+!}
+
+{#>oneline}
+{set:var:a;}
+{var}
+{func:{modify;}:
+    {set:var:b;}
+    {var}
+    {set:var:c;}
+    {var}
+    {nonlocal:var;}
+    {var}
+    {set:var:d;}
+    {var}
+;}
+{modify;}
+{var}

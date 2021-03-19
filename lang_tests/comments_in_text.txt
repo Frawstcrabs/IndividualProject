@@ -1,0 +1,7 @@
+{!
+  Run-time:
+    stdout: 13
+!}
+
+{#>oneline}
+{add:1{!comment!}0:3;}

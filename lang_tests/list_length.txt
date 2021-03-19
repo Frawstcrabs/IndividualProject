@@ -1,0 +1,11 @@
+{!
+  Run-time:
+    stdout: 01234
+!}
+
+{#>oneline}
+{{list;}.length}
+{{list:a;}.length}
+{{list:a:b;}.length}
+{{list:a:b:c;}.length}
+{{list:a:b:c:d;}.length}

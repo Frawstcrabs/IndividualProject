@@ -1,0 +1,19 @@
+{!
+  Run-time:
+    stdout: 0 caught/1 no6throw
+!}
+
+{#>oneline}
+{set:throwcatch:
+    {catch:
+        ignored
+        {throw:caught;}
+        ignored
+    ;}
+;}
+{throwcatch.status} {throwcatch.value}/
+
+{set:successcatch:{catch:
+    no{add:3:3;}throw
+;};}
+{successcatch.status} {successcatch.value}

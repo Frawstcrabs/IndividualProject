@@ -71,7 +71,7 @@ fn main() {
             println!();
         }
         Err(LangError::Throw(v)) => {
-            println!("Err: {:?}", v.borrow().to_string());
+            println!("{}", v.borrow().to_string());
         }
         Err(LangError::CatchUnwind(_)) => {
             panic!("catchunwind escaped interpreter");

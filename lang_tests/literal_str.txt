@@ -1,0 +1,7 @@
+{!
+  Run-time:
+    stdout: hello world
+!}
+
+{#>oneline}
+hello world

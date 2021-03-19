@@ -1,0 +1,11 @@
+{!
+  Run-time:
+    stdout: 
+      
+      hello world
+      <#>oneline:unknown var>
+!}
+
+hello world
+{#>oneline}
+hello world

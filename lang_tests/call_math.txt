@@ -1,0 +1,7 @@
+{!
+  Run-time:
+    stdout: 21
+!}
+
+{#>oneline}
+{fdiv:{add:20:43;}:{mul:1.5:2;};}

@@ -1,0 +1,15 @@
+{!
+  Run-time:
+    stdout: 012345543210
+!}
+
+{#>oneline}
+{func:{example:arg;}:
+    {arg}
+    {if:{lt:{arg}:5;}:
+        {example:{add:{arg}:1;};}
+    ;}
+    {arg}
+;}
+
+{example:0;}

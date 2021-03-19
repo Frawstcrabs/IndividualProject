@@ -1,0 +1,11 @@
+{!
+  Run-time:
+    stdout: 3 3
+!}
+
+{#>oneline}
+{set:var:{list;};}
+{var.push:{lambda:inp:
+    {add:{inp}:5;}
+;};}
+{{{{var}[0]}:97;}.length} {var[0]:97;.length}

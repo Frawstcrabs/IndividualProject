@@ -1,0 +1,7 @@
+{!
+  Run-time:
+    stdout: 5
+!}
+
+{#>oneline}
+{sub:5.1:0.1;}

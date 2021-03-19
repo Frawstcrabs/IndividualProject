@@ -1,0 +1,8 @@
+{!
+  Run-time:
+    stdout: hmmm
+!}
+
+{#>oneline}
+{nonlocal:var;}
+{var}

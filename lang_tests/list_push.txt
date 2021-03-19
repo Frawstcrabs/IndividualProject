@@ -1,0 +1,18 @@
+{!
+  Run-time:
+    stdout: 3abc4abcdindex out of range
+!}
+
+{#>oneline}
+{set:mylist:{list:a:b:c;};}
+{mylist.length}
+{mylist[0]}
+{mylist[1]}
+{mylist[2]}
+{mylist.push:d;}
+{mylist.length}
+{mylist[0]}
+{mylist[1]}
+{mylist[2]}
+{mylist[3]}
+{mylist[4]}

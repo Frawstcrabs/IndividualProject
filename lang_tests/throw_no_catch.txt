@@ -1,0 +1,9 @@
+{!
+  Run-time:
+    stdout: testthrown
+!}
+
+{#>oneline}
+test
+{throw:thrown;}
+ignored

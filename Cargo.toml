@@ -9,4 +9,10 @@ edition = "2018"
 [dependencies]
 nom = "5"
 libgc = {git = "https://github.com/softdevteam/libgc"}
+lang_tester = "0.5.0"
 clap = "2.33.3"
+
+[[test]]
+name = "lang_tests"
+path = "lang_tests/run.rs"
+harness = false

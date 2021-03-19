@@ -1,0 +1,10 @@
+{!
+  Run-time:
+    stdout: ab
+!}
+
+{#>oneline}
+{set:var:a;}
+{var}
+{set:var:b;}
+{var}

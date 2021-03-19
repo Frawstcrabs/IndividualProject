@@ -1,0 +1,13 @@
+{!
+  Run-time:
+    stdout: acbcab
+!}
+
+{#>oneline}
+{set:mylist:{list:a:b:c;};}
+{mylist[0]}
+{mylist[2]}
+{mylist[1]}
+{mylist[-1]}
+{mylist[-3]}
+{mylist[-2]}

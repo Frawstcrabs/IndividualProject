@@ -1,0 +1,10 @@
+{!
+  Run-time:
+    stdout: a<var:unknown var>
+!}
+
+{#>oneline}
+{set:var:a;}
+{var}
+{del:var;}
+{var}

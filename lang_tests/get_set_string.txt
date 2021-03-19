@@ -1,0 +1,7 @@
+{!
+  Run-time:
+    stdout: test b test
+!}
+
+{#>oneline}
+te{set:a:b;}st {a} test
