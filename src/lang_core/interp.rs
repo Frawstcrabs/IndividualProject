@@ -382,6 +382,17 @@ impl VarValues {
                     }
                 }
             },
+            VarValues::Nil => {
+                let name = index.borrow().to_string();
+                match &name[..] {
+                    "length" => {
+                        Ok(new_value!(VarValues::Num(0.0)))
+                    },
+                    _ => {
+                        throw_string!("invalid attr")
+                    }
+                }
+            },
             VarValues::CatchResult(is_success, v) => {
                 let name = index.borrow().to_string();
                 match &name[..] {
