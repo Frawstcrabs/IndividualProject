@@ -758,8 +758,8 @@ impl Context {
                                 ns = Gc::clone(new_ns);
                             }
                             None => {
-                                var_value = new_value!(VarValues::Str(format!("<{}:unknown var>", name)));
-                                break;
+                                //println!("not found");
+                                return throw_string!("<{}:unknown var>", name);
                             }
                         }
                     }
