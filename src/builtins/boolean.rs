@@ -11,7 +11,7 @@ use crate::lang_core::interp::{
 use crate::builtins::math::val_to_f64;
 use std::cell::RefCell;
 
-fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
+pub fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
     use VarValues::*;
     match (&*item1.borrow(), &*item2.borrow()) {
         (Nil, Nil) => {

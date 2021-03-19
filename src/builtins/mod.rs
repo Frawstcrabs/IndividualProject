@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use crate::lang_core::interp::{VarValues, Gc, VarRefType, SendSyncRefCell};
 use crate::new_value;
 
-mod boolean;
+pub(crate) mod boolean;
 pub(crate) mod math;
 
 macro_rules! add_func {

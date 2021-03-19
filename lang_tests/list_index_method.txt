@@ -1,0 +1,8 @@
+{!
+  Run-time:
+    stdout: 1 -1
+!}
+
+{#>oneline}
+{set:mylist:{list:a:b:c;};}
+{mylist.index:b;} {mylist.index:d;}

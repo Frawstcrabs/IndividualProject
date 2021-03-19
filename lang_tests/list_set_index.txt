@@ -1,0 +1,18 @@
+{!
+  Run-time:
+    stdout: abcadcedc
+!}
+
+{#>oneline}
+{set:mylist:{list:a:b:c;};}
+{mylist[0]}
+{mylist[1]}
+{mylist[2]}
+{set:mylist[1]:d;}
+{mylist[0]}
+{mylist[1]}
+{mylist[2]}
+{set:mylist[-3]:e;}
+{mylist[0]}
+{mylist[1]}
+{mylist[2]}

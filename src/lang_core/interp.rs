@@ -1,6 +1,7 @@
 use crate::bytecode::Instruction;
 use crate::builtins::register_builtins;
 use crate::builtins::math::val_to_f64;
+use crate::builtins::boolean::test_equality;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -312,6 +313,30 @@ impl VarValues {
                                 VarValues::List(vals) => {
                                     vals.extend(args);
                                     Ok(new_value!(VarValues::Nil))
+                                }
+                                _ => unreachable!()
+                            }
+                        };
+                        Ok(
+                            new_value!(
+                                VarValues::RustClosure(Box::new(method))
+                            )
+                        )
+                    },
+                    "index" => {
+                        let method = move |_ctx: &mut Context, args: Vec<Gc<VarValues>>| {
+                            if args.len() != 1 {
+                                return throw_string!("<list.index:expected 1 arg, got {}", args.len());
+                            }
+                            let arg = &args[0];
+                            match &mut *obj.borrow_mut() {
+                                VarValues::List(vals) => {
+                                    for i in 0..vals.len() {
+                                        if test_equality(&vals[i], arg) {
+                                            return Ok(new_value!(VarValues::Num(i as f64)));
+                                        }
+                                    }
+                                    Ok(new_value!(VarValues::Num(-1.0)))
                                 }
                                 _ => unreachable!()
                             }
