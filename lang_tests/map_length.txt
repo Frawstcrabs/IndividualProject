@@ -1,0 +1,9 @@
+{!
+  Run-time:
+    stdout: 2 2 2
+!}
+
+{#>oneline}
+
+{set:mymap:{map:a:b:c:d;};}
+{mymap.length} {mymap.keys.length} {mymap.values.length}

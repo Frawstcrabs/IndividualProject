@@ -23,6 +23,7 @@ pub enum VarValues {
     RustClosure(Box<dyn Fn(&mut Context, Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>>>),
     CatchResult(bool, Gc<VarValues>),
     List(Vec<Gc<VarValues>>),
+    Map(HashMap<String, Gc<VarValues>>),
 }
 
 // SAFETY: libgc needs these traits but the lib
@@ -105,6 +106,9 @@ impl ToString for VarValues {
             },
             VarValues::List(_) => {
                 String::from("<List>")
+            },
+            VarValues::Map(_) => {
+                String::from("<Map>")
             }
         }
     }
@@ -133,6 +137,9 @@ impl From<&VarValues> for bool {
                 *is_success
             },
             VarValues::List(vs) => {
+                !vs.is_empty()
+            },
+            VarValues::Map(vs) => {
                 !vs.is_empty()
             },
         }
@@ -189,6 +196,11 @@ impl fmt::Debug for VarValues {
                     .field(vs)
                     .finish()
             },
+            VarValues::Map(vs) => {
+                fmt.debug_tuple("Map")
+                    .field(vs)
+                    .finish()
+            },
         }
     }
 }
@@ -221,6 +233,7 @@ fn validate_list_index(mut v: f64, max: usize) -> LangResult<usize> {
     }
     Ok(v as usize)
 }
+
 fn index_val_str(s: &str, index: f64) -> LangResult<Gc<VarValues>> {
     if index.fract() != 0.0 {
         return throw_string!("invalid index");
@@ -317,6 +330,35 @@ impl VarValues {
                     }
                 }
             },
+            VarValues::Map(vals) => {
+                let name = index.borrow().to_string();
+                match &name[..] {
+                    "length" => {
+                        Ok(new_value!(VarValues::Num(vals.len() as f64)))
+                    },
+                    "keys" => {
+                        Ok(new_value!(
+                            VarValues::List(
+                                vals.keys()
+                                .map(|v| {
+                                    new_value!(VarValues::Str(v.to_owned()))
+                                })
+                                .collect()
+                            )
+                        ))
+                    },
+                    "values" => {
+                        Ok(new_value!(
+                            VarValues::List(
+                                vals.values().map(|v| *v).collect()
+                            )
+                        ))
+                    }
+                    _ => {
+                        throw_string!("invalid attr")
+                    }
+                }
+            },
             VarValues::Str(s) |
             VarValues::AstStr(s, _) => {
                 let name = index.borrow().to_string();
@@ -385,6 +427,13 @@ impl VarValues {
                     },
                 };
                 Ok(Gc::clone(&vs[i]))
+            },
+            VarValues::Map(vals) => {
+                let index = index.borrow().to_string();
+                match vals.get(&index) {
+                    Some(v) => Ok(*v),
+                    None => return throw_string!("<map:{}:unknown key>", index),
+                }
             },
             VarValues::Str(s) |
             VarValues::AstStr(s, _) => {
@@ -456,6 +505,11 @@ impl VarValues {
                 vs[v] = val;
                 Ok(())
             },
+            VarValues::Map(vals) => {
+                let index = index.borrow().to_string();
+                vals.insert(index, val);
+                Ok(())
+            },
             _ => {
                 throw_string!("cannot set index")
             },
@@ -489,6 +543,11 @@ impl VarValues {
                 vs.remove(v);
                 Ok(())
             }
+            VarValues::Map(vals) => {
+                let index = index.borrow().to_string();
+                vals.remove(&index);
+                Ok(())
+            },
             _ => {
                 throw_string!("cannot del index")
             }
@@ -821,6 +880,21 @@ impl Context {
                 self.stack.push(
                     new_value!(
                         VarValues::List(vals)
+                    )
+                );
+            },
+            Instruction::CREATEMAP(n) => {
+                let vals = self.stack.split_off(self.stack.len() - n);
+                let mut map = HashMap::with_capacity(n/2);
+                let mut iter = vals.into_iter();
+                for _ in 0..n/2 {
+                    let key = iter.next().unwrap().borrow().to_string();
+                    let value = iter.next().unwrap();
+                    map.insert(key, value);
+                }
+                self.stack.push(
+                    new_value!(
+                        VarValues::Map(map)
                     )
                 );
             },

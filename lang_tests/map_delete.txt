@@ -1,0 +1,13 @@
+{!
+  Run-time:
+    stdout: 2bdd<map:a:unknown key>
+!}
+
+{#>oneline}
+{set:mymap:{map:a:b:c:d;};}
+{mymap.length}
+{mymap[a]}
+{mymap[c]}
+{del:mymap[a];}
+{mymap[c]}
+{mymap[a]}

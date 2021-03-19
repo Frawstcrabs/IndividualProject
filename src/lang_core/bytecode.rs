@@ -18,6 +18,7 @@ pub enum Instruction {
     CREATEFUNC(Vec<String>, usize, usize),
     CALLFUNC(usize, bool),
     CREATELIST(usize),
+    CREATEMAP(usize),
     GETVAR(String),
     GETINDEX,
     GETATTR,
@@ -238,6 +239,17 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ast_vec_bytecode(ctx, v, ValStatus::Temp, true, false)?;
                         }
                         ctx.prog.push(Instruction::CREATELIST(args.len()));
+                        if direct_output {
+                            ctx.prog.push(Instruction::OUTPUTVAL);
+                        }
+                        Ok(true)
+                    },
+                    "map" => {
+                        assert!(args.len() % 2 == 0);
+                        for v in args {
+                            ast_vec_bytecode(ctx, v, ValStatus::Temp, true, false)?;
+                        }
+                        ctx.prog.push(Instruction::CREATEMAP(args.len()));
                         if direct_output {
                             ctx.prog.push(Instruction::OUTPUTVAL);
                         }

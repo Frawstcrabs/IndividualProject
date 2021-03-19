@@ -1,0 +1,14 @@
+{!
+  Run-time:
+    stdout: 2bd2ed
+!}
+
+{#>oneline}
+{set:mymap:{map:a:b:c:d;};}
+{mymap.length}
+{mymap[a]}
+{mymap[c]}
+{set:mymap[a]:e;}
+{mymap.length}
+{mymap[a]}
+{mymap[c]}

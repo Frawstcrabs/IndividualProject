@@ -1,0 +1,12 @@
+{!
+  Run-time:
+    stdout: 2bdb
+!}
+
+{#>oneline}
+{set:mymap:{map:a:b:c:d;};}
+{mymap.length}
+{mymap[a]}
+{mymap[c]}
+{set:var:a;}
+{mymap[{var}]}
