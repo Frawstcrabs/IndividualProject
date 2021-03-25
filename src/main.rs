@@ -59,7 +59,13 @@ fn main() {
         }
     };
     //println!("ast: {:?}", ast);
-    let program = bytecode::generate_bytecode(&ast);
+    let program = match bytecode::generate_bytecode(&ast) {
+        Ok(prog) => prog,
+        Err(val) => {
+            eprintln!("SYNTAX ERROR: {:?}", val);
+            return;
+        }
+    };
     // for (inst, i) in program.iter().zip(0..) {
     //     println!("{:<2} - {:?}", i, inst);
     // }
@@ -74,7 +80,7 @@ fn main() {
             println!("{}", v.borrow().to_string());
         }
         Err(LangError::CatchUnwind(_)) => {
-            panic!("catchunwind escaped interpreter");
+            panic!("INTERNAL ERROR: catchunwind escaped interpreter");
         }
     }
 }

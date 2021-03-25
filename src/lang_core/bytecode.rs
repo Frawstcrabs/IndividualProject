@@ -88,11 +88,33 @@ impl CompilerCtx {
 }
 
 #[derive(Debug)]
-enum ASTErrors {
+enum InternalASTErrors {
     LoopJumpCutoff,
+    InvalidArgCount(String, usize),
+    NonlocalInGlobalScope,
+    InvalidIdentifier(String),
+    ContinueOutsideOfLoop,
+    BreakOutsideOfLoop,
+    CannotSetFunctionCall,
+    EmptySetCall,
+    CannotDelFunctionCall,
+    EmptyDelCall
 }
 
-fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(), ASTErrors> {
+#[derive(Debug)]
+pub enum ASTErrors {
+    InvalidArgCount(String, usize),
+    NonlocalInGlobalScope,
+    InvalidIdentifier(String),
+    ContinueOutsideOfLoop,
+    BreakOutsideOfLoop,
+    CannotSetFunctionCall,
+    EmptySetCall,
+    CannotDelFunctionCall,
+    EmptyDelCall
+}
+
+fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(), InternalASTErrors> {
     match accessor {
         Accessor::Index(arg) => {
             ast_vec_bytecode(ctx, arg, ValStatus::Temp, false, false)?;
@@ -113,7 +135,7 @@ fn ast_accessor_bytecode(ctx: &mut CompilerCtx, accessor: &Accessor) -> Result<(
     Ok(())
 }
 
-fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess, direct_output: bool) -> Result<(), ASTErrors> {
+fn ast_var_access(ctx: &mut CompilerCtx, var: &VarAccess, direct_output: bool) -> Result<(), InternalASTErrors> {
     match &var.value[..] {
         [AST::String(s, _)] => {
             ctx.prog.push(Instruction::GETVAR(s.to_owned()));
@@ -160,7 +182,7 @@ fn count_stack_vals(counts: &Vec<(ValStatus, usize, usize)>) -> (usize, usize) {
         })
 }
 
-fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result<bool, ASTErrors> {
+fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result<bool, InternalASTErrors> {
     //println!("ast_bytecode\n  {:?}\n  {:?}", ast, ctx.current_loop);
     match ast {
         AST::String(s, v) => {
@@ -174,7 +196,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
             match (&var.value[..], &var.accessors[..]) {
                 ([AST::String(s, _)], [Accessor::Call(args)]) => match &s[..] {
                     "if" => {
-                        assert!(args.len() >= 2);
+                        if args.len() < 2 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("if"), args.len()));
+                        }
                         let mut i = 0;
                         let mut end_jumps = Vec::new();
                         let mut prev_jump: usize;
@@ -184,7 +208,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ctx.prog.push(Instruction::IFFALSE(0));
                             i += 1;
                             match ast_vec_bytecode(ctx, &args[i], ValStatus::Returned, false, direct_output) {
-                                Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                                Ok(_) | Err(InternalASTErrors::LoopJumpCutoff) => {},
                                 Err(v) => return Err(v),
                             }
 
@@ -207,7 +231,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ctx.prog.push(Instruction::PUSHNIL);
                         } else {
                             match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false, direct_output) {
-                                Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                                Ok(_) | Err(InternalASTErrors::LoopJumpCutoff) => {},
                                 Err(v) => return Err(v),
                             }
                         }
@@ -224,11 +248,10 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         Ok(true)
                     },
                     "lambda" => {
-                        assert!(args.len() >= 1);
-                        // all args before last are parameters
-                        // must be literal strings and not variable/function calls
-                        // last arg is the function body
-                        ast_compile_function(ctx, args);
+                        if args.len() == 0 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("lambda"), args.len()));
+                        }
+                        ast_compile_function(ctx, args)?;
                         if direct_output {
                             ctx.prog.push(Instruction::OUTPUTVAL);
                         }
@@ -245,7 +268,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         Ok(true)
                     },
                     "map" => {
-                        assert!(args.len() % 2 == 0);
+                        if args.len() % 2 != 0 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("map"), args.len()));
+                        }
                         for v in args {
                             ast_vec_bytecode(ctx, v, ValStatus::Temp, true, false)?;
                         }
@@ -256,28 +281,34 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         Ok(true)
                     },
                     "nonlocal" => {
-                        assert!(args.len() == 1);
+                        if args.len() != 1 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("nonlocal"), args.len()));
+                        }
                         if !ctx.in_function {
-                            panic!("nonlocal only allowed in functions");
+                            return Err(InternalASTErrors::NonlocalInGlobalScope);
                         }
                         match &args[0][..] {
                             [AST::String(s, _)] => {
                                 ctx.prog.push(Instruction::SETNONLOCAL(s.to_owned()));
                             },
                             _ => {
-                                panic!("cannot set arbitrary expressions as nonlocal");
+                                return Err(InternalASTErrors::InvalidIdentifier(String::from("nonlocal")));
                             }
                         }
                         Ok(false)
                     },
                     "throw" => {
-                        assert!(args.len() == 1);
+                        if args.len() != 1 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("throw"), args.len()));
+                        }
                         ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true, false)?;
                         ctx.prog.push(Instruction::THROWVAL);
                         Ok(false)
                     },
                     "catch" => {
-                        assert!(args.len() == 1);
+                        if args.len() != 1 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("catch"), args.len()));
+                        }
                         let startcatch_index = ctx.prog.len();
                         ctx.prog.push(Instruction::STARTCATCH(0));
                         ctx.inc_catch_count();
@@ -304,7 +335,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         Ok(true)
                     },
                     "while" => {
-                        assert!(args.len() == 2);
+                        if args.len() != 2 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("while"), args.len()));
+                        }
                         ctx.prog.push(Instruction::WHILESTART);
                         let test_start = ctx.prog.len();
                         // this value is technically outside of the while body, so
@@ -324,7 +357,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         let false_jump = ctx.prog.len();
                         ctx.prog.push(Instruction::IFFALSE(0));
                         match ast_vec_bytecode(ctx, &args[1], ValStatus::Returned, false, direct_output) {
-                            Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                            Ok(_) | Err(InternalASTErrors::LoopJumpCutoff) => {},
                             Err(v) => return Err(v),
                         }
                         let continue_jump = ctx.prog.len();
@@ -360,13 +393,15 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                                 }
                             }
                         } else {
-                            panic!("while loop data overwritten inside loop")
+                            panic!("INTERNAL ERROR: while loop data overwritten inside loop")
                         }
                         ctx.prog.push(Instruction::LOOPEND(!direct_output));
                         Ok(true)
                     },
                     "for" => {
-                        assert!(args.len() >= 3 && args.len() <= 5);
+                        if args.len() < 3 || args.len() > 5 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("for"), args.len()));
+                        }
                         ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true, false)?;
                         match args.len() {
                             3 => {
@@ -401,7 +436,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             })
                         );
                         match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false, direct_output) {
-                            Ok(_) | Err(ASTErrors::LoopJumpCutoff) => {},
+                            Ok(_) | Err(InternalASTErrors::LoopJumpCutoff) => {},
                             Err(v) => return Err(v),
                         }
                         let continue_jump = ctx.prog.len();
@@ -438,16 +473,17 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                                 }
                             }
                         } else {
-                            panic!("for loop data overwritten inside loop")
+                            panic!("INTERNAL ERROR: for loop data overwritten inside loop")
                         }
                         ctx.prog.push(Instruction::LOOPEND(!direct_output));
                         Ok(true)
                     }
                     "continue" => {
-                        assert!(args.is_empty());
+                        if !args.is_empty() {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("continue"), args.len()));
+                        }
                         if let Some(LoopJumps{continues, val_counts, catch_count, ..}) = &mut ctx.current_loop {
                             let (temp_vals, ret_vals) = count_stack_vals(val_counts);
-                            println!("continue, {:?}, ({:?}, {:?})", val_counts, temp_vals, ret_vals);
                             if temp_vals > 0 {
                                 ctx.prog.push(Instruction::DROP(temp_vals));
                             }
@@ -467,16 +503,17 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             }
                             continues.push(ctx.prog.len());
                             ctx.prog.push(Instruction::GOTO(0));
-                            Err(ASTErrors::LoopJumpCutoff)
+                            Err(InternalASTErrors::LoopJumpCutoff)
                         } else {
-                            panic!("continue used outside of loop");
+                            return Err(InternalASTErrors::ContinueOutsideOfLoop);
                         }
                     },
                     "break" => {
-                        assert!(args.is_empty());
+                        if !args.is_empty() {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("break"), args.len()));
+                        }
                         if let Some(LoopJumps{breaks, val_counts, catch_count, ..}) = &mut ctx.current_loop {
                             let (temp_vals, ret_vals) = count_stack_vals(val_counts);
-                            println!("break, {:?}, ({:?}, {:?})", val_counts, temp_vals, ret_vals);
                             if temp_vals > 0 {
                                 ctx.prog.push(Instruction::DROP(temp_vals));
                             }
@@ -496,9 +533,9 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             }
                             breaks.push(ctx.prog.len());
                             ctx.prog.push(Instruction::GOTO(0));
-                            Err(ASTErrors::LoopJumpCutoff)
+                            Err(InternalASTErrors::LoopJumpCutoff)
                         } else {
-                            panic!("break used outside of loop");
+                            return Err(InternalASTErrors::BreakOutsideOfLoop);
                         }
                     },
                     _ => {
@@ -536,12 +573,12 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ctx.prog.push(Instruction::SETATTR);
                         },
                         Accessor::Call(_) => {
-                            panic!("cannot set to function call");
+                            return Err(InternalASTErrors::CannotSetFunctionCall);
                         },
                     }
                 },
                 (_, []) => {
-                    panic!("cannot set arbitrary values");
+                    return Err(InternalASTErrors::EmptySetCall);
                 }
                 _ => {
                     ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
@@ -561,7 +598,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ctx.prog.push(Instruction::SETATTR);
                         },
                         Accessor::Call(_) => {
-                            panic!("cannot set to function call");
+                            return Err(InternalASTErrors::CannotSetFunctionCall);
                         },
                     }
                 },
@@ -589,12 +626,12 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ctx.prog.push(Instruction::DELATTR);
                         },
                         Accessor::Call(_) => {
-                            panic!("cannot del function call");
+                            return Err(InternalASTErrors::CannotDelFunctionCall);
                         },
                     }
                 },
                 (_, []) => {
-                    panic!("{}", "invalid {del;} call");
+                    return Err(InternalASTErrors::EmptyDelCall);
                 }
                 _ => {
                     ast_vec_bytecode(ctx, &var.value, ValStatus::Temp, true, false)?;
@@ -612,7 +649,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             ctx.prog.push(Instruction::DELATTR);
                         },
                         Accessor::Call(_) => {
-                            panic!("cannot del function call");
+                            return Err(InternalASTErrors::CannotDelFunctionCall);
                         },
                     }
                 },
@@ -622,7 +659,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
     }
 }
 
-fn ast_compile_function(ctx: &mut CompilerCtx, args: &[Vec<AST>]) {
+fn ast_compile_function(ctx: &mut CompilerCtx, args: &[Vec<AST>]) -> Result<(), InternalASTErrors> {
     let mut arg_names = Vec::with_capacity(args.len() - 1);
     for arg in &args[..args.len() - 1] {
         match &arg[..] {
@@ -630,7 +667,7 @@ fn ast_compile_function(ctx: &mut CompilerCtx, args: &[Vec<AST>]) {
                 arg_names.push(s.to_owned());
             },
             _ => {
-                panic!("param name of lambda was not literal string");
+                return Err(InternalASTErrors::InvalidIdentifier(String::from("lambda")));
             }
         }
     }
@@ -641,13 +678,19 @@ fn ast_compile_function(ctx: &mut CompilerCtx, args: &[Vec<AST>]) {
         current_loop: None,
         in_function: true,
     };
-    ast_vec_bytecode(&mut func_ctx, &args[args.len() - 1], ValStatus::Returned, true, true)
-        .expect("ASTError leaked outside of compiler");
+    match ast_vec_bytecode(&mut func_ctx, &args[args.len() - 1], ValStatus::Returned, true, true) {
+        Err(InternalASTErrors::LoopJumpCutoff) => {
+            panic!("INTERNAL ERROR: loop jump cutoff leaked out of function body");
+        }
+        Err(v) => return Err(v),
+        Ok(_) => {}
+    }
     func_ctx.prog.push(Instruction::END);
     ast_link_functions(&mut func_ctx);
     let current_len = ctx.prog.len();
     ctx.prog.push(Instruction::CREATEFUNC(arg_names, 0, 0));
     ctx.funcs.push((current_len, func_ctx.prog));
+    Ok(())
 }
 
 fn ast_link_functions(ctx: &mut CompilerCtx) {
@@ -669,7 +712,7 @@ fn ast_vec_bytecode(ctx: &mut CompilerCtx,
                     astlist: &[AST],
                     status: ValStatus,
                     add_temp: bool,
-                    direct_output: bool) -> Result<(), ASTErrors> {
+                    direct_output: bool) -> Result<(), InternalASTErrors> {
     //println!("ast_vec_bytecode\n  {:?}\n  {:?}", astlist, ctx.current_loop);
     if let Some(cur_loop) = &mut ctx.current_loop {
         match cur_loop.val_counts.last() {
@@ -749,17 +792,48 @@ fn ast_vec_bytecode(ctx: &mut CompilerCtx,
     Ok(())
 }
 
-pub fn generate_bytecode(ast: &[AST]) -> Vec<Instruction> {
+pub fn generate_bytecode(ast: &[AST]) -> Result<Vec<Instruction>, ASTErrors> {
     let mut ctx = CompilerCtx {
         prog: Vec::new(),
         funcs: Vec::new(),
         current_loop: None,
         in_function: false,
     };
-    ast_vec_bytecode(&mut ctx, ast, ValStatus::Returned, true, true)
-        .expect("ASTError leaked outside of compiler");
+    match ast_vec_bytecode(&mut ctx, ast, ValStatus::Returned, true, true) {
+        Ok(_) => {}
+        Err(InternalASTErrors::LoopJumpCutoff) => {
+            panic!("INTERNAL ERROR: loop jump cutoff leaked out of program");
+        }
+        Err(InternalASTErrors::InvalidArgCount(n, c)) => {
+            return Err(ASTErrors::InvalidArgCount(n, c));
+        }
+        Err(InternalASTErrors::NonlocalInGlobalScope) => {
+            return Err(ASTErrors::NonlocalInGlobalScope);
+        }
+        Err(InternalASTErrors::InvalidIdentifier(n)) => {
+            return Err(ASTErrors::InvalidIdentifier(n));
+        }
+        Err(InternalASTErrors::ContinueOutsideOfLoop) => {
+            return Err(ASTErrors::ContinueOutsideOfLoop);
+        }
+        Err(InternalASTErrors::BreakOutsideOfLoop) => {
+            return Err(ASTErrors::BreakOutsideOfLoop);
+        }
+        Err(InternalASTErrors::CannotSetFunctionCall) => {
+            return Err(ASTErrors::CannotSetFunctionCall);
+        }
+        Err(InternalASTErrors::EmptySetCall) => {
+            return Err(ASTErrors::EmptySetCall);
+        }
+        Err(InternalASTErrors::CannotDelFunctionCall) => {
+            return Err(ASTErrors::CannotDelFunctionCall);
+        }
+        Err(InternalASTErrors::EmptyDelCall) => {
+            return Err(ASTErrors::EmptyDelCall);
+        }
+    }
     ctx.prog.push(Instruction::END);
     ast_link_functions(&mut ctx);
 
-    return ctx.prog;
+    return Ok(ctx.prog);
 }

@@ -1,6 +1,6 @@
 {!
   Run-time:
-    stdout: hmmm
+    stderr: SYNTAX ERROR: NonlocalInGlobalScope
 !}
 
 {#>oneline}
