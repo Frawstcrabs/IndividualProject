@@ -6,11 +6,12 @@ use crate::lang_core::interp::{
     Context,
     Gc,
     string_to_f64,
-    new_value
+    new_value,
+    borrow_val
 };
 
 pub(crate) fn val_to_f64(val: &Gc<VarValues>, func_name: &str) -> LangResult<f64> {
-    match &*val.borrow() {
+    match &*borrow_val(val)? {
         VarValues::Num(n) |
         VarValues::AstStr(_, Some(n))=> {
             Ok(*n)

@@ -2,7 +2,7 @@ use crate::bytecode::Instruction;
 use crate::builtins::register_builtins;
 use crate::builtins::math::val_to_f64;
 use crate::builtins::boolean::test_equality;
-use std::cell::RefCell;
+use std::cell::{RefCell, Ref, RefMut};
 use std::collections::HashMap;
 use std::fmt;
 use libgc::{Gc as Gc_};
@@ -102,8 +102,8 @@ impl ToString for VarValues {
             VarValues::RustClosure(_) => {
                 String::from("<Function>")
             },
-            VarValues::CatchResult(_, v) => {
-                v.borrow().to_string()
+            VarValues::CatchResult(_, _) => {
+                String::from("<Catch>")
             },
             VarValues::List(_) => {
                 String::from("<List>")
@@ -221,6 +221,20 @@ macro_rules! throw_string {
     };
 }
 
+pub fn borrow_val<'a, T>(val: &'a Gc<T>) -> LangResult<Ref<'a, T>> {
+    match val.try_borrow() {
+        Ok(v) => Ok(v),
+        Err(_) => throw_string!("<cannot borrow>")
+    }
+}
+
+pub fn borrow_val_mut<'a, T>(val: &'a Gc<T>) -> LangResult<RefMut<'a, T>> {
+    match val.try_borrow_mut() {
+        Ok(v) => Ok(v),
+        Err(_) => throw_string!("<cannot borrow mut>")
+    }
+}
+
 fn validate_list_index(mut v: f64, max: usize) -> LangResult<usize> {
     if v.fract() != 0.0 {
         return throw_string!("invalid index");
@@ -287,12 +301,12 @@ impl VarValues {
             },
             VarValues::RustFunc(f) => {
                 let ret_val = f(ctx, args)?;
-                outputter.output_value(ret_val);
+                outputter.output_value(ret_val)?;
                 Ok(())
             },
             VarValues::RustClosure(f) => {
                 let ret_val = f(ctx, args)?;
-                outputter.output_value(ret_val);
+                outputter.output_value(ret_val)?;
                 Ok(())
             },
             _ => {
@@ -304,11 +318,11 @@ impl VarValues {
     fn get_attr(&self, obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
-                let name = index.borrow().to_string();
+                let name = borrow_val(&index)?.to_string();
                 match &name[..] {
                     "push" => {
                         let method = move |_ctx: &mut Context, args: Vec<Gc<VarValues>>| {
-                            match &mut *obj.borrow_mut() {
+                            match &mut *borrow_val_mut(&obj)? {
                                 VarValues::List(vals) => {
                                     vals.extend(args);
                                     Ok(new_value(VarValues::Nil))
@@ -328,10 +342,10 @@ impl VarValues {
                                 return throw_string!("<list.index:expected 1 arg, got {}", args.len());
                             }
                             let arg = &args[0];
-                            match &mut *obj.borrow_mut() {
+                            match &mut *borrow_val_mut(&obj)? {
                                 VarValues::List(vals) => {
                                     for i in 0..vals.len() {
-                                        if test_equality(&vals[i], arg) {
+                                        if test_equality(&vals[i], arg)? {
                                             return Ok(new_value(VarValues::Num(i as f64)));
                                         }
                                     }
@@ -355,7 +369,7 @@ impl VarValues {
                 }
             },
             VarValues::Map(vals) => {
-                let name = index.borrow().to_string();
+                let name = borrow_val(&index)?.to_string();
                 match &name[..] {
                     "length" => {
                         Ok(new_value(VarValues::Num(vals.len() as f64)))
@@ -385,7 +399,7 @@ impl VarValues {
             },
             VarValues::Str(s) |
             VarValues::AstStr(s, _) => {
-                let name = index.borrow().to_string();
+                let name = borrow_val(&index)?.to_string();
                 match &name[..] {
                     "length" => {
                         Ok(new_value(VarValues::Num(s.chars().count() as f64)))
@@ -396,7 +410,7 @@ impl VarValues {
                 }
             },
             VarValues::Num(n) => {
-                let name = index.borrow().to_string();
+                let name = borrow_val(&index)?.to_string();
                 match &name[..] {
                     "length" => {
                         Ok(new_value(VarValues::Num(f64_to_string(*n).chars().count() as f64)))
@@ -407,7 +421,7 @@ impl VarValues {
                 }
             },
             VarValues::Nil => {
-                let name = index.borrow().to_string();
+                let name = borrow_val(&index)?.to_string();
                 match &name[..] {
                     "length" => {
                         Ok(new_value(VarValues::Num(0.0)))
@@ -418,7 +432,7 @@ impl VarValues {
                 }
             },
             VarValues::CatchResult(is_success, v) => {
-                let name = index.borrow().to_string();
+                let name = borrow_val(&index)?.to_string();
                 match &name[..] {
                     "status" => {
                         Ok(
@@ -444,7 +458,7 @@ impl VarValues {
     fn get_index(&self, _obj: Gc<VarValues>, index: Gc<VarValues>) -> LangResult<Gc<VarValues>> {
         match self {
             VarValues::List(vs) => {
-                let i = match &*index.borrow() {
+                let i = match &*borrow_val(&index)? {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -464,7 +478,7 @@ impl VarValues {
                 Ok(Gc::clone(&vs[i]))
             },
             VarValues::Map(vals) => {
-                let index = index.borrow().to_string();
+                let index = borrow_val(&index)?.to_string();
                 match vals.get(&index) {
                     Some(v) => Ok(*v),
                     None => return throw_string!("<map:{}:unknown key>", index),
@@ -472,7 +486,7 @@ impl VarValues {
             },
             VarValues::Str(s) |
             VarValues::AstStr(s, _) => {
-                let v = match &*index.borrow() {
+                let v = match &*borrow_val(&index)? {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => v,
@@ -492,7 +506,7 @@ impl VarValues {
                 index_val_str(s, v)
             },
             VarValues::Num(n) => {
-                let v = match &*index.borrow() {
+                let v = match &*borrow_val(&index)? {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => v,
@@ -520,7 +534,7 @@ impl VarValues {
     fn set_index(&mut self, _obj: Gc<VarValues>, index: Gc<VarValues>, val: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
-                let v = match &*index.borrow() {
+                let v = match &*borrow_val(&index)? {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -541,7 +555,7 @@ impl VarValues {
                 Ok(())
             },
             VarValues::Map(vals) => {
-                let index = index.borrow().to_string();
+                let index = borrow_val(&index)?.to_string();
                 vals.insert(index, val);
                 Ok(())
             },
@@ -558,7 +572,7 @@ impl VarValues {
     fn del_index(&mut self, index: Gc<VarValues>) -> LangResult<()> {
         match self {
             VarValues::List(vs) => {
-                let v = match &*index.borrow() {
+                let v = match &*borrow_val(&index)? {
                     VarValues::Str(s) => {
                         match string_to_f64(s) {
                             Some(v) => validate_list_index(v, vs.len())?,
@@ -579,7 +593,7 @@ impl VarValues {
                 Ok(())
             }
             VarValues::Map(vals) => {
-                let index = index.borrow().to_string();
+                let index = borrow_val(&index)?.to_string();
                 vals.remove(&index);
                 Ok(())
             },
@@ -637,7 +651,7 @@ enum LoopType {
 
 pub trait Outputter {
     fn output_string(&mut self, s: &str, v: Option<f64>);
-    fn output_value(&mut self, v: Gc<VarValues>);
+    fn output_value(&mut self, v: Gc<VarValues>) -> LangResult<()>;
 }
 
 pub struct StdOutOutput {}
@@ -647,8 +661,9 @@ impl Outputter for StdOutOutput {
         print!("{}", s);
     }
 
-    fn output_value(&mut self, v: Gc<VarValues>) {
-        print!("{}", v.borrow().to_string());
+    fn output_value(&mut self, v: Gc<VarValues>) -> LangResult<()> {
+        print!("{}", borrow_val(&v)?.to_string());
+        Ok(())
     }
 }
 
@@ -661,8 +676,9 @@ impl Outputter for CollectOutput {
         self.results.push(new_value(VarValues::AstStr(s.to_owned(), v)));
     }
 
-    fn output_value(&mut self, v: Gc<VarValues>) {
+    fn output_value(&mut self, v: Gc<VarValues>) -> LangResult<()> {
         self.results.push(Gc::clone(&v));
+        Ok(())
     }
 }
 
@@ -672,44 +688,45 @@ pub struct Context {
     cur_scope: Gc<Namespace>,
 }
 
-fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
-    let mut values = values
-        .into_iter()
-        .filter(|v| {
-            match &*v.borrow() {
-                VarValues::Nil => false,
-                _ => true
+fn concat_vals(values: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
+    let mut filtered_values = Vec::with_capacity(values.len());
+    for val in values {
+        match &*borrow_val(&val)? {
+            VarValues::Nil => {},
+            _ => {
+                filtered_values.push(val);
             }
-        })
-        .collect::<Vec<_>>();
-    match values.len() {
+        }
+    }
+    match filtered_values.len() {
         0 => {
             // only nil values found
-            new_value(VarValues::Nil)
+            Ok(new_value(VarValues::Nil))
         }
         1 => {
             // nothing else to concat with
-            values.pop().unwrap()
+            Ok(filtered_values.pop().unwrap())
         }
         _ => {
             // multiple items, need to convert to strings first
-            let strings = values.into_iter()
-                .map(|v| v.borrow().to_string())
-                .collect::<Vec<_>>();
+            let mut strings = Vec::with_capacity(filtered_values.len());
+            for val in filtered_values {
+                strings.push(borrow_val(&val)?.to_string());
+            }
             let string_len = strings.iter().map(|s| s.len()).sum();
             let mut new_string = String::with_capacity(string_len);
             for s in strings {
                 new_string.push_str(&s);
             }
-            new_value(VarValues::Str(new_string))
+            Ok(new_value(VarValues::Str(new_string)))
         }
     }
 }
 
-fn set_scope_var(name: String, value: Gc<VarValues>, mut ns: Gc<Namespace>) {
+fn set_scope_var(name: String, value: Gc<VarValues>, mut ns: Gc<Namespace>) -> LangResult<()> {
     loop {
         let cur_ns = Gc::clone(&ns);
-        let mut ns_ref = cur_ns.borrow_mut();
+        let mut ns_ref = borrow_val_mut(&cur_ns)?;
         match ns_ref.vars.get_mut(&name) {
             Some(VarRefType::NonLocal) => match &ns_ref.outer_scope {
                 Some(new_ns) => {
@@ -729,6 +746,8 @@ fn set_scope_var(name: String, value: Gc<VarValues>, mut ns: Gc<Namespace>) {
             }
         }
     }
+
+    Ok(())
 }
 
 impl Context {
@@ -792,10 +811,10 @@ impl Context {
             }
             Instruction::OUTPUTVAL => {
                 let val = self.stack.pop().unwrap();
-                outputter.output_value(val);
+                outputter.output_value(val)?;
             }
             Instruction::IFFALSE(i) => {
-                let test: bool = (&*self.stack.pop().unwrap().borrow()).into();
+                let test: bool = (&*borrow_val(&self.stack.pop().unwrap())?).into();
                 if !test {
                     *counter = *i;
                     return Ok(());
@@ -808,7 +827,7 @@ impl Context {
             Instruction::CONCAT(n) => {
                 let n = *n;
                 if n >= 2 {
-                    let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
+                    let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n))?;
                     self.stack.push(concat_val);
                 }
             },
@@ -817,31 +836,31 @@ impl Context {
             },
             Instruction::SETVAR(name) => {
                 let value = self.stack.pop().unwrap();
-                set_scope_var(name.clone(), value, Gc::clone(&self.cur_scope));
+                set_scope_var(name.clone(), value, Gc::clone(&self.cur_scope))?;
             },
             Instruction::SETATTR => {
                 let val = self.stack.pop().unwrap();
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                obj.borrow_mut().set_attr(obj_clone, index, val)?;
+                borrow_val_mut(&obj)?.set_attr(obj_clone, index, val)?;
             },
             Instruction::SETINDEX => {
                 let val = self.stack.pop().unwrap();
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                obj.borrow_mut().set_index(obj_clone, index, val)?;
+                borrow_val_mut(&obj)?.set_index(obj_clone, index, val)?;
             },
             Instruction::SETNONLOCAL(name) => {
-                self.cur_scope.borrow_mut().vars.insert(name.clone(), VarRefType::NonLocal);
+                borrow_val_mut(&self.cur_scope)?.vars.insert(name.clone(), VarRefType::NonLocal);
             },
             Instruction::GETVAR(name) => {
                 let mut ns = Gc::clone(&self.cur_scope);
                 let var_value;
                 loop {
                     let cur_ns = Gc::clone(&ns);
-                    let ns_ref = cur_ns.borrow();
+                    let ns_ref = borrow_val(&cur_ns)?;
                     match ns_ref.vars.get(name) {
                         Some(VarRefType::Value(v)) => {
                             var_value = Gc::clone(v);
@@ -864,26 +883,26 @@ impl Context {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                self.stack.push(obj.borrow().get_attr(obj_clone, index)?);
+                self.stack.push(borrow_val(&obj)?.get_attr(obj_clone, index)?);
             },
             Instruction::GETINDEX => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
                 let obj_clone = Gc::clone(&obj);
-                self.stack.push(obj.borrow().get_index(obj_clone, index)?);
+                self.stack.push(borrow_val(&obj)?.get_index(obj_clone, index)?);
             },
             Instruction::DELVAR(name) => {
-                self.cur_scope.borrow_mut().vars.remove(name);
+                borrow_val_mut(&self.cur_scope)?.vars.remove(name);
             },
             Instruction::DELATTR => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
-                obj.borrow_mut().del_attr(index)?;
+                borrow_val_mut(&obj)?.del_attr(index)?;
             },
             Instruction::DELINDEX => {
                 let index = self.stack.pop().unwrap();
                 let obj = self.stack.pop().unwrap();
-                obj.borrow_mut().del_index(index)?;
+                borrow_val_mut(&obj)?.del_index(index)?;
             },
             Instruction::CREATEFUNC(arg_names, loc, size) => {
                 let loc = *loc;
@@ -901,13 +920,13 @@ impl Context {
                 let args = self.stack.split_off(self.stack.len() - arg_size);
                 let called_var = self.stack.pop().unwrap();
                 if *direct_output {
-                    called_var.borrow().call(self, args, outputter)?;
+                    borrow_val(&called_var)?.call(self, args, outputter)?;
                 } else {
                     let mut collector = CollectOutput {
                         results: Vec::new(),
                     };
-                    called_var.borrow().call(self, args, &mut collector)?;
-                    self.stack.push(concat_vals(collector.results));
+                    borrow_val(&called_var)?.call(self, args, &mut collector)?;
+                    self.stack.push(concat_vals(collector.results)?);
                 }
             },
             Instruction::CREATELIST(n) => {
@@ -923,7 +942,7 @@ impl Context {
                 let mut map = HashMap::with_capacity(n/2);
                 let mut iter = vals.into_iter();
                 for _ in 0..n/2 {
-                    let key = iter.next().unwrap().borrow().to_string();
+                    let key = borrow_val(&iter.next().unwrap())?.to_string();
                     let value = iter.next().unwrap();
                     map.insert(key, value);
                 }
@@ -943,11 +962,11 @@ impl Context {
                 let step = val_to_f64(&self.stack.pop().unwrap(), "for")?;
                 let end = val_to_f64(&self.stack.pop().unwrap(), "for")?;
                 let start = val_to_f64(&self.stack.pop().unwrap(), "for")?;
-                let ident = self.stack.pop().unwrap().borrow().to_string();
+                let ident = borrow_val(&self.stack.pop().unwrap())?.to_string();
                 if step == 0.0 {
                     return throw_string!("<for:zero-size step>");
                 }
-                set_scope_var(ident.clone(), new_value(VarValues::Num(start)), Gc::clone(&self.cur_scope));
+                set_scope_var(ident.clone(), new_value(VarValues::Num(start)), Gc::clone(&self.cur_scope))?;
                 self.loop_stack.push(LoopFrame {
                     stack_vals: 0,
                     loop_data: LoopType::For {
@@ -978,7 +997,7 @@ impl Context {
                 match &mut self.loop_stack.last_mut().unwrap().loop_data {
                     LoopType::For {ident, value, step, ..} => {
                         *value += *step;
-                        set_scope_var(ident.clone(), new_value(VarValues::Num(*value)), Gc::clone(&self.cur_scope));
+                        set_scope_var(ident.clone(), new_value(VarValues::Num(*value)), Gc::clone(&self.cur_scope))?;
                     }
                     _ => {
                         panic!("invalid loop type in FORTEST");
@@ -999,7 +1018,7 @@ impl Context {
                             // no concat necessary
                         },
                         _ => {
-                            let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n));
+                            let concat_val = concat_vals(self.stack.split_off(self.stack.len() - n))?;
                             self.stack.push(concat_val);
                         },
                     }

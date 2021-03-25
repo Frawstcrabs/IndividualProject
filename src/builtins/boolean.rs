@@ -6,40 +6,41 @@ use crate::lang_core::interp::{
     Context,
     Gc,
     f64_to_string,
-    new_value
+    new_value,
+    borrow_val
 };
 use crate::builtins::math::val_to_f64;
 
-pub fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
+pub fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> LangResult<bool> {
     use VarValues::*;
-    match (&*item1.borrow(), &*item2.borrow()) {
+    match (&*borrow_val(item1)?, &*borrow_val(item2)?) {
         (Nil, Nil) => {
-            true
+            Ok(true)
         },
         (Nil, Str(s)) |
         (Str(s), Nil) |
         (Nil, AstStr(s, _)) |
         (AstStr(s, _), Nil) => {
-            s.is_empty()
+            Ok(s.is_empty())
         },
         (Num(n1), Num(n2)) |
         (AstStr(_, Some(n1)), Num(n2)) |
         (Num(n1), AstStr(_, Some(n2))) |
         (AstStr(_, Some(n1)), AstStr(_, Some(n2))) => {
-            n1 == n2
+            Ok(n1 == n2)
         },
         (Str(s1), Str(s2)) |
         (AstStr(s1, _), Str(s2)) |
         (Str(s1), AstStr(s2, _)) |
         (AstStr(s1, None), AstStr(s2, None)) => {
-            s1 == s2
+            Ok(s1 == s2)
         },
         (Str(s), Num(n)) |
         (Num(n), Str(s)) => {
-            s == &f64_to_string(*n)
+            Ok(s == &f64_to_string(*n))
         },
         (_, _) => {
-            false
+            Ok(false)
         },
     }
 }
@@ -48,7 +49,7 @@ pub fn not_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
     if args.len() != 1 {
         return throw_string!("<eq:expected 1 arg, got {}>", args.len());
     }
-    let bool_val: bool = (&*args[0].borrow()).into();
+    let bool_val: bool = (&*borrow_val(&args[0])?).into();
     return Ok(
         new_value(
             VarValues::Num(if !bool_val {1.0} else {0.0})
@@ -64,7 +65,7 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     let mut item1 = &args[0];
     for item2 in &args[1..] {
         use VarValues::*;
-        if !test_equality(item1, item2) {
+        if !test_equality(item1, item2)? {
             return Ok(new_value(Num(0.0)));
         }
         item1 = item2;
@@ -81,7 +82,7 @@ pub fn ne_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     let mut item1 = &args[0];
     for item2 in &args[1..] {
         use VarValues::*;
-        if test_equality(item1, item2) {
+        if test_equality(item1, item2)? {
             return Ok(new_value(Num(0.0)));
         }
         item1 = item2;
@@ -121,7 +122,7 @@ pub fn and_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
         return throw_string!("<and:expected 2+ args, got {}>", args.len());
     }
     for arg in &args[..args.len()-1] {
-        let test: bool = (&*arg.borrow()).into();
+        let test: bool = (&*borrow_val(arg)?).into();
         if !test {
             return Ok(*arg);
         }
@@ -134,7 +135,7 @@ pub fn or_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
         return throw_string!("<or:expected 2+ args, got {}>", args.len());
     }
     for arg in &args[..args.len()-1] {
-        let test: bool = (&*arg.borrow()).into();
+        let test: bool = (&*borrow_val(arg)?).into();
         if test {
             return Ok(*arg);
         }
