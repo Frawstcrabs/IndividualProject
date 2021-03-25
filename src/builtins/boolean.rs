@@ -1,4 +1,4 @@
-use crate::{throw_string, new_value};
+use crate::throw_string;
 use crate::lang_core::interp::{
     LangResult,
     LangError,
@@ -6,10 +6,9 @@ use crate::lang_core::interp::{
     Context,
     Gc,
     f64_to_string,
-    SendSyncRefCell
+    new_value
 };
 use crate::builtins::math::val_to_f64;
-use std::cell::RefCell;
 
 pub fn test_equality(item1: &Gc<VarValues>, item2: &Gc<VarValues>) -> bool {
     use VarValues::*;
@@ -51,7 +50,7 @@ pub fn not_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<V
     }
     let bool_val: bool = (&*args[0].borrow()).into();
     return Ok(
-        new_value!(
+        new_value(
             VarValues::Num(if !bool_val {1.0} else {0.0})
         )
     );
@@ -66,12 +65,12 @@ pub fn eq_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     for item2 in &args[1..] {
         use VarValues::*;
         if !test_equality(item1, item2) {
-            return Ok(new_value!(Num(0.0)));
+            return Ok(new_value(Num(0.0)));
         }
         item1 = item2;
     }
 
-    Ok(new_value!(VarValues::Num(1.0)))
+    Ok(new_value(VarValues::Num(1.0)))
 }
 
 pub fn ne_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<VarValues>> {
@@ -83,12 +82,12 @@ pub fn ne_func(_ctx: &mut Context, args: Vec<Gc<VarValues>>) -> LangResult<Gc<Va
     for item2 in &args[1..] {
         use VarValues::*;
         if test_equality(item1, item2) {
-            return Ok(new_value!(Num(0.0)));
+            return Ok(new_value(Num(0.0)));
         }
         item1 = item2;
     }
 
-    Ok(new_value!(VarValues::Num(1.0)))
+    Ok(new_value(VarValues::Num(1.0)))
 }
 
 macro_rules! num_comp_func {
@@ -102,12 +101,12 @@ macro_rules! num_comp_func {
             for item2 in &args[1..] {
                 let item2 = val_to_f64(item2, $lang_name)?;
                 if !(item1 $op item2) {
-                    return Ok(new_value!(Num(0.0)));
+                    return Ok(new_value(Num(0.0)));
                 }
                 item1 = item2;
             }
 
-            Ok(new_value!(Num(1.0)))
+            Ok(new_value(Num(1.0)))
         }
     }
 }

@@ -206,16 +206,15 @@ impl fmt::Debug for VarValues {
     }
 }
 
-#[macro_export]
-macro_rules! new_value {
-    ($val:expr) => {Gc::new(SendSyncRefCell(RefCell::new($val)))};
+pub fn new_value<T>(val: T) -> Gc<T> {
+    Gc::new(SendSyncRefCell(RefCell::new(val)))
 }
 
 #[macro_export]
 macro_rules! throw_string {
     ($($args:expr),+) => {
         Err(LangError::Throw(
-            new_value!(
+            new_value(
                 VarValues::Str(format!($($args),+))
             )
         ))
@@ -243,13 +242,13 @@ fn index_val_str(s: &str, index: f64) -> LangResult<Gc<VarValues>> {
     if index >= 0 {
         let index = index as usize;
         match s.chars().nth(index) {
-            Some(c) => Ok(new_value!(VarValues::Str(c.to_string()))),
+            Some(c) => Ok(new_value(VarValues::Str(c.to_string()))),
             None => throw_string!("index out of range")
         }
     } else {
         let index = (-1 - index) as usize;
         match s.chars().nth_back(index) {
-            Some(c) => Ok(new_value!(VarValues::Str(c.to_string()))),
+            Some(c) => Ok(new_value(VarValues::Str(c.to_string()))),
             None => throw_string!("index out of range")
         }
     }
@@ -270,14 +269,14 @@ impl VarValues {
                     vars.insert(
                         String::from("args"),
                         VarRefType::Value(
-                            new_value!(
+                            new_value(
                                 VarValues::List(args)
                             )
                         )
                     );
                 }
                 let old_scope = Gc::clone(&ctx.cur_scope);
-                let new_ns = new_value!(Namespace {
+                let new_ns = new_value(Namespace {
                     vars,
                     outer_scope: Some(Gc::clone(&outer_scope)),
                 });
@@ -312,13 +311,13 @@ impl VarValues {
                             match &mut *obj.borrow_mut() {
                                 VarValues::List(vals) => {
                                     vals.extend(args);
-                                    Ok(new_value!(VarValues::Nil))
+                                    Ok(new_value(VarValues::Nil))
                                 }
                                 _ => unreachable!()
                             }
                         };
                         Ok(
-                            new_value!(
+                            new_value(
                                 VarValues::RustClosure(Box::new(method))
                             )
                         )
@@ -333,22 +332,22 @@ impl VarValues {
                                 VarValues::List(vals) => {
                                     for i in 0..vals.len() {
                                         if test_equality(&vals[i], arg) {
-                                            return Ok(new_value!(VarValues::Num(i as f64)));
+                                            return Ok(new_value(VarValues::Num(i as f64)));
                                         }
                                     }
-                                    Ok(new_value!(VarValues::Num(-1.0)))
+                                    Ok(new_value(VarValues::Num(-1.0)))
                                 }
                                 _ => unreachable!()
                             }
                         };
                         Ok(
-                            new_value!(
+                            new_value(
                                 VarValues::RustClosure(Box::new(method))
                             )
                         )
                     },
                     "length" => {
-                        Ok(new_value!(VarValues::Num(vs.len() as f64)))
+                        Ok(new_value(VarValues::Num(vs.len() as f64)))
                     },
                     _ => {
                         throw_string!("invalid attr")
@@ -359,21 +358,21 @@ impl VarValues {
                 let name = index.borrow().to_string();
                 match &name[..] {
                     "length" => {
-                        Ok(new_value!(VarValues::Num(vals.len() as f64)))
+                        Ok(new_value(VarValues::Num(vals.len() as f64)))
                     },
                     "keys" => {
-                        Ok(new_value!(
+                        Ok(new_value(
                             VarValues::List(
                                 vals.keys()
                                 .map(|v| {
-                                    new_value!(VarValues::Str(v.to_owned()))
+                                    new_value(VarValues::Str(v.to_owned()))
                                 })
                                 .collect()
                             )
                         ))
                     },
                     "values" => {
-                        Ok(new_value!(
+                        Ok(new_value(
                             VarValues::List(
                                 vals.values().map(|v| *v).collect()
                             )
@@ -389,7 +388,7 @@ impl VarValues {
                 let name = index.borrow().to_string();
                 match &name[..] {
                     "length" => {
-                        Ok(new_value!(VarValues::Num(s.chars().count() as f64)))
+                        Ok(new_value(VarValues::Num(s.chars().count() as f64)))
                     },
                     _ => {
                         throw_string!("invalid attr")
@@ -400,7 +399,7 @@ impl VarValues {
                 let name = index.borrow().to_string();
                 match &name[..] {
                     "length" => {
-                        Ok(new_value!(VarValues::Num(f64_to_string(*n).chars().count() as f64)))
+                        Ok(new_value(VarValues::Num(f64_to_string(*n).chars().count() as f64)))
                     },
                     _ => {
                         throw_string!("invalid attr")
@@ -411,7 +410,7 @@ impl VarValues {
                 let name = index.borrow().to_string();
                 match &name[..] {
                     "length" => {
-                        Ok(new_value!(VarValues::Num(0.0)))
+                        Ok(new_value(VarValues::Num(0.0)))
                     },
                     _ => {
                         throw_string!("invalid attr")
@@ -423,7 +422,7 @@ impl VarValues {
                 match &name[..] {
                     "status" => {
                         Ok(
-                            new_value!(
+                            new_value(
                                 VarValues::Num(if *is_success {1.0} else {0.0})
                             )
                         )
@@ -659,7 +658,7 @@ pub struct CollectOutput {
 
 impl Outputter for CollectOutput {
     fn output_string(&mut self, s: &str, v: Option<f64>) {
-        self.results.push(new_value!(VarValues::AstStr(s.to_owned(), v)));
+        self.results.push(new_value(VarValues::AstStr(s.to_owned(), v)));
     }
 
     fn output_value(&mut self, v: Gc<VarValues>) {
@@ -686,7 +685,7 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
     match values.len() {
         0 => {
             // only nil values found
-            new_value!(VarValues::Nil)
+            new_value(VarValues::Nil)
         }
         1 => {
             // nothing else to concat with
@@ -702,7 +701,7 @@ fn concat_vals(values: Vec<Gc<VarValues>>) -> Gc<VarValues> {
             for s in strings {
                 new_string.push_str(&s);
             }
-            new_value!(VarValues::Str(new_string))
+            new_value(VarValues::Str(new_string))
         }
     }
 }
@@ -736,7 +735,7 @@ impl Context {
     pub fn new() -> Self {
         let mut global_vars = HashMap::new();
         register_builtins(&mut global_vars);
-        let global_scope = new_value!(Namespace {
+        let global_scope = new_value(Namespace {
             vars: global_vars,
             outer_scope: None,
         });
@@ -749,13 +748,13 @@ impl Context {
     pub fn with_args(args: Vec<String>) -> Self {
         let mut global_vars = HashMap::new();
         register_builtins(&mut global_vars);
-        let args_var = new_value!(VarValues::List(
+        let args_var = new_value(VarValues::List(
             args.into_iter()
-                .map(|s| new_value!(VarValues::Str(s)))
+                .map(|s| new_value(VarValues::Str(s)))
                 .collect()
         ));
         global_vars.insert(String::from("args"), VarRefType::Value(args_var));
-        let global_scope = new_value!(Namespace {
+        let global_scope = new_value(Namespace {
             vars: global_vars,
             outer_scope: None,
         });
@@ -770,23 +769,23 @@ impl Context {
         match &prog[*counter] {
             Instruction::PUSHSTR(s) => {
                 self.stack.push(
-                    new_value!(
+                    new_value(
                         VarValues::Str(s.clone())
                     )
                 );
             },
             Instruction::PUSHASTSTR(s, v) => {
                 self.stack.push(
-                    new_value!(
+                    new_value(
                         VarValues::AstStr(s.clone(), *v)
                     )
                 );
             },
             Instruction::PUSHNIL => {
-                self.stack.push(new_value!(VarValues::Nil));
+                self.stack.push(new_value(VarValues::Nil));
             },
             Instruction::PUSHNUM(n) => {
-                self.stack.push(new_value!(VarValues::Num(*n)));
+                self.stack.push(new_value(VarValues::Num(*n)));
             }
             Instruction::OUTPUTSTR(s, v) => {
                 outputter.output_string(s, *v);
@@ -890,7 +889,7 @@ impl Context {
                 let loc = *loc;
                 let size = *size;
                 self.stack.push(
-                    new_value!(VarValues::Func(
+                    new_value(VarValues::Func(
                         arg_names.clone(),
                         prog[loc..loc+size].to_vec(),
                         Gc::clone(&self.cur_scope)
@@ -914,7 +913,7 @@ impl Context {
             Instruction::CREATELIST(n) => {
                 let vals = self.stack.split_off(self.stack.len() - n);
                 self.stack.push(
-                    new_value!(
+                    new_value(
                         VarValues::List(vals)
                     )
                 );
@@ -929,7 +928,7 @@ impl Context {
                     map.insert(key, value);
                 }
                 self.stack.push(
-                    new_value!(
+                    new_value(
                         VarValues::Map(map)
                     )
                 );
@@ -948,7 +947,7 @@ impl Context {
                 if step == 0.0 {
                     return throw_string!("<for:zero-size step>");
                 }
-                set_scope_var(ident.clone(), new_value!(VarValues::Num(start)), Gc::clone(&self.cur_scope));
+                set_scope_var(ident.clone(), new_value(VarValues::Num(start)), Gc::clone(&self.cur_scope));
                 self.loop_stack.push(LoopFrame {
                     stack_vals: 0,
                     loop_data: LoopType::For {
@@ -979,7 +978,7 @@ impl Context {
                 match &mut self.loop_stack.last_mut().unwrap().loop_data {
                     LoopType::For {ident, value, step, ..} => {
                         *value += *step;
-                        set_scope_var(ident.clone(), new_value!(VarValues::Num(*value)), Gc::clone(&self.cur_scope));
+                        set_scope_var(ident.clone(), new_value(VarValues::Num(*value)), Gc::clone(&self.cur_scope));
                     }
                     _ => {
                         panic!("invalid loop type in FORTEST");
@@ -994,7 +993,7 @@ impl Context {
                     let n = self.loop_stack.pop().unwrap().stack_vals;
                     match n {
                         0 => {
-                            self.stack.push(new_value!(VarValues::Nil));
+                            self.stack.push(new_value(VarValues::Nil));
                         },
                         1 => {
                             // no concat necessary
@@ -1016,7 +1015,7 @@ impl Context {
                     Ok(_) => {
                         let top_val = self.stack.pop().unwrap();
                         self.stack.push(
-                            new_value!(
+                            new_value(
                                 VarValues::CatchResult(true, top_val)
                             )
                         );
@@ -1025,7 +1024,7 @@ impl Context {
                         self.stack.truncate(stack_size);
                         self.loop_stack.truncate(loop_stack_size);
                         self.stack.push(
-                            new_value!(
+                            new_value(
                                 VarValues::CatchResult(false, err_val)
                             )
                         );
