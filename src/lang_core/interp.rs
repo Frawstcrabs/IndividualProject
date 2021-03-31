@@ -647,6 +647,12 @@ enum LoopType {
         step: f64,
         end: f64,
     },
+    ForEach {
+        ident: String,
+        list_index: usize,
+        list_ref: Ref<'static, VarValues>,
+        _list_gc_ref: Gc<VarValues>,
+    }
 }
 
 pub trait Outputter {
@@ -958,11 +964,10 @@ impl Context {
                     loop_data: LoopType::While,
                 });
             },
-            Instruction::FORSTART => {
+            Instruction::FORSTART(ident) => {
                 let step = val_to_f64(&self.stack.pop().unwrap(), "for")?;
                 let end = val_to_f64(&self.stack.pop().unwrap(), "for")?;
                 let start = val_to_f64(&self.stack.pop().unwrap(), "for")?;
-                let ident = borrow_val(&self.stack.pop().unwrap())?.to_string();
                 if step == 0.0 {
                     return throw_string!("<for:zero-size step>");
                 }
@@ -970,7 +975,7 @@ impl Context {
                 self.loop_stack.push(LoopFrame {
                     stack_vals: 0,
                     loop_data: LoopType::For {
-                        ident,
+                        ident: ident.clone(),
                         value: start,
                         step,
                         end,
@@ -1001,6 +1006,55 @@ impl Context {
                     }
                     _ => {
                         panic!("invalid loop type in FORTEST");
+                    }
+                }
+            },
+            Instruction::FOREACHSTART(ident) => {
+                let list = self.stack.pop().unwrap();
+                let list_ref = borrow_val(&list)?;
+                match &*list_ref {
+                    VarValues::List(vals) => {
+                        set_scope_var(ident.clone(), Gc::clone(&vals[0]), Gc::clone(&self.cur_scope))?;
+                    }
+                    _ => {
+                        return throw_string!("<foreach:invalid iter type>");
+                    }
+                }
+                self.loop_stack.push(LoopFrame {
+                    stack_vals: 0,
+                    loop_data: LoopType::ForEach {
+                        ident: ident.clone(),
+                        list_index: 0,
+                        _list_gc_ref: list,
+                        list_ref: unsafe {
+                            // SAFETY: The foreach loop needs to hold the list as immutably
+                            // borrowed, so that the loop body cannot change it, but RefCell
+                            // ref values require a static lifetime param, despite the fact that
+                            // RefCell already handles borrow checking at runtime
+                            // This just allows me to hold this ref dynamically and prevent the
+                            // list from being edited until the loop ends
+                            std::mem::transmute::<Ref<'_, VarValues>, Ref<'static, VarValues>>(list_ref)
+                        },
+                    },
+                });
+            },
+            Instruction::FOREACHITER(jump) => {
+                match &mut self.loop_stack.last_mut().unwrap().loop_data {
+                    LoopType::ForEach {ident, list_index, list_ref, ..} => {
+                        match &**list_ref {
+                            VarValues::List(vals) => {
+                                if vals.len() == *list_index {
+                                    *counter = *jump;
+                                } else {
+                                    set_scope_var(ident.clone(), Gc::clone(&vals[*list_index]), Gc::clone(&self.cur_scope))?;
+                                    *list_index += 1;
+                                }
+                            }
+                            _ => unreachable!()
+                        }
+                    }
+                    _ => {
+                        panic!("invalid loop type in FOREACHTEST");
                     }
                 }
             },

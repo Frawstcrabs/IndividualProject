@@ -30,9 +30,11 @@ pub enum Instruction {
     DELATTR,
     SETNONLOCAL(String),
     WHILESTART,
-    FORSTART,
+    FORSTART(String),
     FORTEST(usize),
     FORITER,
+    FOREACHSTART(String),
+    FOREACHITER(usize),
     LOOPINCR,
     LOOPEND(bool),
     STARTCATCH(usize),
@@ -371,11 +373,11 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             },
                             _ => unreachable!(),
                         }
-                        let while_data = mem::replace(
+                        let jump_data = mem::replace(
                             &mut ctx.current_loop,
                             outer_loop
                         );
-                        if let Some(LoopJumps{breaks, continues, ..}) = while_data {
+                        if let Some(LoopJumps{breaks, continues, ..}) = jump_data {
                             for index in breaks {
                                 match &mut ctx.prog[index] {
                                     Instruction::GOTO(ptr) => {
@@ -402,6 +404,12 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         if args.len() < 3 || args.len() > 5 {
                             return Err(InternalASTErrors::InvalidArgCount(String::from("for"), args.len()));
                         }
+                        let ident = match &args[0][..] {
+                            [AST::String(ident, _)] => ident.clone(),
+                            _ => {
+                                return Err(InternalASTErrors::InvalidIdentifier(String::from("for")));
+                            }
+                        };
                         ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, true, false)?;
                         match args.len() {
                             3 => {
@@ -422,7 +430,7 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             _ => unreachable!(),
                         }
                         ctx.set_block_args(0);
-                        ctx.prog.push(Instruction::FORSTART);
+                        ctx.prog.push(Instruction::FORSTART(ident));
                         let test_start = ctx.prog.len();
                         ctx.prog.push(Instruction::FORTEST(0));
 
@@ -451,11 +459,11 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             },
                             _ => unreachable!(),
                         }
-                        let while_data = mem::replace(
+                        let jump_data = mem::replace(
                             &mut ctx.current_loop,
                             outer_loop
                         );
-                        if let Some(LoopJumps{breaks, continues, ..}) = while_data {
+                        if let Some(LoopJumps{breaks, continues, ..}) = jump_data {
                             for index in breaks {
                                 match &mut ctx.prog[index] {
                                     Instruction::GOTO(ptr) => {
@@ -474,6 +482,73 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                             }
                         } else {
                             panic!("INTERNAL ERROR: for loop data overwritten inside loop")
+                        }
+                        ctx.prog.push(Instruction::LOOPEND(!direct_output));
+                        Ok(true)
+                    }
+                    "foreach" => {
+                        if args.len() != 3 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("foreach"), args.len()));
+                        }
+                        let ident = match &args[0][..] {
+                            [AST::String(ident, _)] => ident.clone(),
+                            _ => {
+                                return Err(InternalASTErrors::InvalidIdentifier(String::from("foreach")));
+                            }
+                        };
+                        ast_vec_bytecode(ctx, &args[1], ValStatus::Temp, true, false)?;
+                        ctx.set_block_args(0);
+                        ctx.prog.push(Instruction::FOREACHSTART(ident));
+                        let test_start = ctx.prog.len();
+                        ctx.prog.push(Instruction::FOREACHITER(0));
+
+                        let outer_loop = mem::replace(
+                            &mut ctx.current_loop,
+                            Some(LoopJumps {
+                                breaks: Vec::new(),
+                                continues: Vec::new(),
+                                catch_count: 0,
+                                val_counts: Vec::new(),
+                            })
+                        );
+                        match ast_vec_bytecode(ctx, args.last().unwrap(), ValStatus::Returned, false, direct_output) {
+                            Ok(_) | Err(InternalASTErrors::LoopJumpCutoff) => {},
+                            Err(v) => return Err(v),
+                        }
+                        let continue_jump = ctx.prog.len();
+                        ctx.prog.push(Instruction::LOOPINCR);
+                        ctx.prog.push(Instruction::GOTO(test_start));
+                        let loop_end = ctx.prog.len();
+                        ctx.prog.push(Instruction::LOOPINCR);
+                        match &mut ctx.prog[test_start] {
+                            Instruction::FOREACHITER(ptr) => {
+                                *ptr = loop_end+1;
+                            },
+                            _ => unreachable!(),
+                        }
+                        let jump_data = mem::replace(
+                            &mut ctx.current_loop,
+                            outer_loop
+                        );
+                        if let Some(LoopJumps{breaks, continues, ..}) = jump_data {
+                            for index in breaks {
+                                match &mut ctx.prog[index] {
+                                    Instruction::GOTO(ptr) => {
+                                        *ptr = loop_end;
+                                    },
+                                    _ => unreachable!(),
+                                }
+                            }
+                            for index in continues {
+                                match &mut ctx.prog[index] {
+                                    Instruction::GOTO(ptr) => {
+                                        *ptr = continue_jump;
+                                    },
+                                    _ => unreachable!(),
+                                }
+                            }
+                        } else {
+                            panic!("INTERNAL ERROR: foreach loop data overwritten inside loop")
                         }
                         ctx.prog.push(Instruction::LOOPEND(!direct_output));
                         Ok(true)
