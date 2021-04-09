@@ -392,6 +392,27 @@ impl VarValues {
                             )
                         ))
                     }
+                    "contains" => {
+                        let method = move |_ctx: &mut Context, args: Vec<Gc<VarValues>>| {
+                            if args.len() != 1 {
+                                return throw_string!("<map.contains:expected 1 arg, got {}", args.len());
+                            }
+                            let arg = &args[0];
+                            let arg_str = borrow_val(arg)?.to_string();
+                            match &mut *borrow_val_mut(&obj)? {
+                                VarValues::Map(vals) => {
+                                    let ret = vals.contains_key(&arg_str);
+                                    Ok(new_value(VarValues::Num(if ret {1.0} else {0.0})))
+                                }
+                                _ => unreachable!()
+                            }
+                        };
+                        Ok(
+                            new_value(
+                                VarValues::RustClosure(Box::new(method))
+                            )
+                        )
+                    },
                     _ => {
                         throw_string!("invalid attr")
                     }
