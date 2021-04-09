@@ -1,0 +1,10 @@
+{!
+  Run-time:
+    stdout: 1,3,5,7,9,
+!}
+
+{#>oneline}
+{set:items:{list:1:3:5:7:9;};}
+{foreach:item:{items}:
+    {item},
+;}

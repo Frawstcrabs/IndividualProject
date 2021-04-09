@@ -1,0 +1,15 @@
+{!
+  Run-time:
+    stdout: thrown
+!}
+
+{#>oneline}
+
+{set:res:{catch:
+    {while:1:
+        {throw:thrown;}
+        ignored
+    ;}
+;};}
+
+{res.value}

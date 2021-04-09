@@ -1,0 +1,11 @@
+{!
+  Run-time:
+    stdout: <cannot borrow mut>
+!}
+
+{#>oneline}
+{set:items:{list:1:3:5:7:9;};}
+{foreach:item:{items}:
+    {items.push:0;}
+    error
+;}

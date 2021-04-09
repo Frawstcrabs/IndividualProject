@@ -1,0 +1,13 @@
+{!
+  Run-time:
+    stderr: SYNTAX ERROR: BreakOutsideOfLoop
+!}
+
+{#>oneline}
+{func:{error;}:
+    {break;}
+;}
+{while:1:
+    {error;}
+;}
+    

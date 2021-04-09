@@ -1,0 +1,11 @@
+{!
+  Run-time:
+    stdout: b
+!}
+
+{#>oneline}
+{void:
+    {set:a:b;}
+    ignored
+;}
+{a}

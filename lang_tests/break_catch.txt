@@ -1,0 +1,17 @@
+{!
+  Run-time:
+    stdout: output
+!}
+
+{#>oneline}
+
+{set:res:
+    {while:1:
+        output
+        {catch:
+            {break;}
+        ;}
+    ;}
+;}
+
+{res}

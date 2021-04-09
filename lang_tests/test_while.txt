@@ -1,0 +1,18 @@
+{!
+  Run-time:
+    stdout: 1,3,5,7,9,11
+!}
+
+{#>oneline}
+{set:i:-1;}
+{while:1:
+    {set:i:{add:{i}:1;};}
+    {if:{eq:{mod:{i}:2;}:0;}:
+        {continue;}
+    :{ge:{i}:10;}:
+        {break;}
+    :
+        {i},
+    ;}
+;}
+{i}
