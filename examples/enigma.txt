@@ -1,0 +1,70 @@
+{! Enigma machine simulator
+ ! Takes the first CLI argument and runs it through an enigma machine simulator to encrypt it
+ ! TESTSTRING becomes BJALOQUWAE, BJALOQUWAE becomes TESTSTRING
+ !}
+
+{#>oneline}
+{set:rotors:{list
+    :{map:
+        index:24:
+        nums:{list:8:3:23:4:24:11:12:15:9:2:21:19:17:7:22:5:10:20:13:6:1:14:16:0:25:18;};}
+    :{map:
+        index:5:
+        nums:{list:11:19:12:18:17:1:0:25:3:10:16:6:13:4:21:14:15:22:20:23:5:7:8:2:24:9;};}
+    :{map:
+        index:12:
+        nums:{list:22:20:13:14:23:19:3:1:7:8:4:16:18:17:5:24:0:10:9:15:25:21:11:12:6:2;};}
+    :{map:
+        index:19:
+        nums:{list:2:0:25:12:21:10:18:5:7:6:13:11:19:22:3:1:14:20:4:15:24:17:16:8:23:9;};}
+    :{map:
+        index:7:
+        nums:{list:22:15:2:14:3:19:12:11:18:20:6:4:17:1:0:13:5:25:7:10:23:16:8:21:24:9;};}
+;};}
+
+{set:alphabet_to_num:{list:0:1:2:3:4:5:6:7:8:9:10:11:12:13:14:15:16:17:18:19:20:21:22:23:24:25;};}
+{set:alphabet:{list:A:B:C:D:E:F:G:H:I:J:K:L:M:N:O:P:Q:R:S:T:U:V:W:X:Y:Z;};}
+
+{func:{run_rotor:index:rotor;}:
+    {set:rotor_index:{rotor[nums].index:{index};};}
+    {if:{eq:{mod:{rotor_index}:2;}:0;}:
+        {rotor[nums][{add:{rotor_index}:1;}]}
+    :
+        {rotor[nums][{sub:{rotor_index}:1;}]}
+    ;}
+;}
+
+{func:{update_rotors;}:
+    {foreach:rotor:{rotors}:
+        {for:i:{rotor[nums].length}:
+            {if:{eq:{rotor[nums][{i}]}:25;}:
+                {set:rotor[nums][{i}]:0;}
+            :
+                {set:rotor[nums][{i}]:{add:{rotor[nums][{i}]}:1;};}
+            ;}
+        ;}
+        {if:{eq:{rotor[index]}:25;}:
+            {set:rotor[index]:0;}
+        :
+            {set:rotor[index]:{add:{rotor[index]}:1;};}
+            {break;}
+        ;}
+    ;}
+;}
+
+{for:i:{args[0].length}:
+    {set:char:{args[0][{i}]};}
+    {set:index:{alphabet.index:{char};};}
+    {if:{eq:{index}:-1;}:
+        {char}
+        {continue;}
+    ;}
+    {for:j:{rotors.length}:
+        {set:index:{run_rotor:{index}:{rotors[{j}]};};}
+    ;}
+    {for:j:{sub:{rotors.length}:2;}:-1:-1:
+        {set:index:{run_rotor:{index}:{rotors[{j}]};};}
+    ;}
+    {update_rotors;}
+    {alphabet[{index}]}
+;}
