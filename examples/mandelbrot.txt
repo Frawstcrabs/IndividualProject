@@ -1,3 +1,9 @@
+{! Mandelbrot renderer
+ ! Generates a mandelbrot fractal rendered in ASCII uppercase letters
+ ! The height and width variables control the size of the fractal
+ ! The iterations variable can limit the depth to which the fractal is rendered
+ !}
+
 {#>oneline}
 
 {set:height:50;}
