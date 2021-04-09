@@ -336,6 +336,14 @@ fn ast_bytecode(ctx: &mut CompilerCtx, ast: &AST, direct_output: bool) -> Result
                         }
                         Ok(true)
                     },
+                    "void" => {
+                        if args.len() != 1 {
+                            return Err(InternalASTErrors::InvalidArgCount(String::from("void"), args.len()));
+                        }
+                        ast_vec_bytecode(ctx, &args[0], ValStatus::Temp, false, false)?;
+                        ctx.prog.push(Instruction::DROP(1));
+                        Ok(false)
+                    },
                     "while" => {
                         if args.len() != 2 {
                             return Err(InternalASTErrors::InvalidArgCount(String::from("while"), args.len()));
